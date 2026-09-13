@@ -1,6 +1,7 @@
 services:
   db:
     image: pgvector/pgvector:pg17
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_DB: rag
@@ -15,18 +16,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-  redis:
-    image: redis:7-alpine
-    ports: ["127.0.0.1:6379:6379"]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-  qstash:
-    image: public.ecr.aws/upstash/qstash:latest
-    command: ["qstash", "dev"]
-    ports: ["127.0.0.1:8080:8080"]
   migrate:
     build: ./apps/api
     environment:
@@ -36,10 +25,11 @@ services:
       db: {condition: service_healthy}
   api:
     build: ./apps/api
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg://rag_app:${APP_DB_PASSWORD:-local-runtime-only}@db:5432/rag
       APP_ENV: development
-      CORS_ORIGINS: '["http://localhost:3000"]'
+      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3000"]}'
       CHAT_PROVIDER: ${CHAT_PROVIDER:-ollama}
       CHAT_BASE_URL: ${CHAT_BASE_URL:-http://host.docker.internal:11434}
       CHAT_MODEL: ${CHAT_MODEL:-llama3.2}
@@ -50,6 +40,7 @@ services:
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-768}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
     ports: ["127.0.0.1:8000:8000"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
       - ./data:/app/data
     depends_on:
@@ -63,6 +54,7 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
     environment:
       API_BASE_URL: http://api:8000
     ports: ["127.0.0.1:3000:3000"]

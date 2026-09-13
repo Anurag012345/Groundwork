@@ -48,7 +48,7 @@ Stopping containers preserves the PostgreSQL volume.
 Requirements: Python 3.12+, Node.js 22+, and PostgreSQL with pgvector. Docker Compose can supply the database:
 
 ```powershell
-docker compose up -d db redis qstash
+docker compose up -d db
 cd apps/api
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -c constraints.txt -e ".[dev]"

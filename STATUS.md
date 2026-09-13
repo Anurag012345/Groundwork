@@ -110,27 +110,30 @@ Docker Compose is the installer.
    strength of the provider abstraction — but the requirement has to be settled
    per client before install.
 
-### Known defects in the installer
+### Installer defects — fixed 2026-09-13
 
-- **`host.docker.internal` does not resolve on Linux.** The Ollama defaults in
-  `compose.yaml` and `.env.example` point at it, and client servers are Linux.
-  Needs `extra_hosts: ["host.docker.internal:host-gateway"]` on the `api`
-  service. As shipped, the default model provider silently fails to resolve on
-  the target platform.
-- **No `restart: unless-stopped` on any service.** The client's server reboots,
-  the stack stays down.
-- **`redis` and `qstash` are dead services.** Neither is referenced anywhere in
-  the code. Two containers a client would run for nothing — delete them or mark
-  them reserved.
-- **`CORS_ORIGINS` is hardcoded** to `http://localhost:3000` in the `api`
-  service. Must be configurable before the widget can run on a client domain.
-  This is coupled to the widget work, not separate from it.
-- **Backup targets are undocumented.** The `postgres_data` volume and the
-  `./data` bind mount are the two things a client backup must cover.
-- **`APP_ENV` gates the wrong axis.** `app.py:251` and `app.py:368` return 501
-  outside development. Compose pins `development`, so uploads work as shipped —
-  but the gate should key off the storage backend, not the environment name.
-  About an hour's change, not a blocker.
+- **`host.docker.internal` did not resolve on Linux.** The Ollama defaults in
+  `compose.yaml` and `.env.example` point at it and client servers are Linux, so
+  the default model provider silently failed to resolve on the target platform.
+  Added `extra_hosts: ["host.docker.internal:host-gateway"]` to `api`.
+- **No restart policies.** Added `restart: unless-stopped` to `db`, `api`, and
+  `web`. Deliberately not `migrate`: it is a one-shot job and restarting it
+  forever would be wrong.
+- **`redis` and `qstash` were dead services**, referenced nowhere in the code.
+  Removed, along with the `docker compose up -d db redis qstash` line in the
+  README that would now fail.
+- **`CORS_ORIGINS` was hardcoded** to `http://localhost:3000`. Now
+  `${CORS_ORIGINS:-["http://localhost:3000"]}`, settable from the root `.env`
+  where `.env.example` already documents the JSON-list format.
+
+Verified by structure check only. **None of this has been run.** The real
+validation is `docker compose config` followed by `docker compose up --build`
+on Linux, and that remains the next action.
+
+Still outstanding from the original list: `APP_ENV` gates the wrong axis.
+`app.py:251` and `app.py:368` return 501 outside development, and compose pins
+`development` so uploads work as shipped. The gate should key off the storage
+backend, not the environment name. About an hour, not a blocker.
 
 ### The caveat that could reverse all of this
 
