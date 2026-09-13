@@ -22,7 +22,7 @@ from rag.config import settings
 from rag.db import assert_runtime_role, engine
 from rag.ingestion.parsers import DocumentParseError, document_kind
 from rag.ingestion.processor import IngestionBusy, IngestionFailed, process_ingestion_job
-from rag.providers.errors import ProviderError
+from rag.providers.base import ProviderError
 from rag.providers.factory import chat_model, embedding_model
 from rag.retrieval import retrieve
 from rag.security import SessionDependency, WidgetDependency, new_public_key
@@ -544,19 +544,6 @@ async def process_job(job_id: UUID, session: SessionDependency):
     except IngestionFailed as error:
         raise HTTPException(422, str(error)) from error
     return result
-
-
-@app.post("/v1/chat")
-async def chat(data: ChatInput, session: SessionDependency):
-    messages, sources = await prepare_grounded_chat(data, session.connection)
-    if not messages:
-        return {"answer": FALLBACK_ANSWER, "sources": []}
-    generator = chat_model(settings())
-    try:
-        answer = await generator.generate(messages)
-    finally:
-        await generator.client.aclose()
-    return {"answer": answer, "sources": sources}
 
 
 @app.post("/v1/chat/stream")

@@ -1,6 +1,8 @@
 # Knowledge Studio
 
-A multi-tenant RAG service under active local development, structured for a Next.js frontend and FastAPI backend on Vercel.
+A multi-tenant RAG service with an embeddable website chatbot, delivered as a Docker
+Compose install on a client's own server. Next.js dashboard, FastAPI backend,
+PostgreSQL with pgvector.
 
 ## Implemented milestone
 
@@ -17,9 +19,19 @@ A multi-tenant RAG service under active local development, structured for a Next
 - Grounded chat answers, insufficient-evidence fallback, citations, and a dashboard playground.
 - Runtime-role guard rejecting owners, superusers, bypass-RLS roles, or disabled RLS.
 - Transaction-local tenant context compatible with pooled PostgreSQL connections.
-- Docker Compose services and Vercel configuration templates.
+- Streamed, grounded chat over Server-Sent Events with citations.
+- Embeddable widget in a shadow root, served at `/widget.js`, with a per-chatbot
+  origin allowlist and in-process rate limiting.
+- Docker Compose services for PostgreSQL, migrations, the API, and the dashboard.
 
-Signed QStash delivery, user login, private Vercel Blob uploads, streamed chat, conversation history, and the embeddable website widget are **not implemented yet**. In local development, uploading a document immediately invokes the authenticated development processor and requires the configured embedding model to be reachable. The dashboard displays real API responses and does not invent chat responses or sample tenant data.
+User login, conversation history, chatbot branding, and durable queue delivery are
+**not implemented**. Uploading a document invokes the ingestion processor inline and
+requires the configured embedding model to be reachable, so a large file blocks the
+request that uploaded it.
+
+**Nothing in this repository has been run against a live database.** The test suite
+passes, but the migrations, the runtime role guard, and the widget have never been
+exercised. See [STATUS.md](STATUS.md).
 
 ## Quick start with Docker Desktop
 
@@ -96,17 +108,15 @@ $env:TEST_DATABASE_URL = $env:DATABASE_URL
 
 The integration test creates unique test tenants and removes only its own records. It verifies cross-tenant reads, deletion, insertion, and missing-context denial. Passing unit tests does not establish database isolation; run the integration suite before using client data.
 
-## Vercel preparation
+## Deployment
 
-The configuration files are templates only; no projects have been linked or deployed.
+Delivery is a Docker Compose install on the client's own server, not a hosted
+service. The Vercel configuration templates were removed with the rest of the
+serverless assumptions; `git log` has them if that model ever returns.
 
-- Web project root: `apps/web`; framework: Next.js.
-- API project root: `apps/api`; entry point: `app.py`; Python: 3.12 or later.
-- Set web `API_BASE_URL` to the corresponding API environment's HTTPS URL.
-- Supply API `DATABASE_URL` using the restricted runtime role through Neon's pooled endpoint.
-- Run migrations once using a separate administrator connection, outside function startup.
-- Keep preview data and credentials separate from production.
-- Redis, QStash, and private Blob adapters are planned and are not connected yet.
-- Local Ollama will be a development provider. Hosted inference requires a reachable, authenticated model endpoint; models will not be loaded inside Vercel Functions.
+Two things are still missing before a real install: nothing terminates TLS and
+every published port binds `127.0.0.1`, so put a reverse proxy in front, and the
+install, upgrade, and backup procedure is not written. A backup must cover the
+`postgres_data` volume and the `./data` bind mount.
 
 Further tasks and acceptance criteria live in [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md).

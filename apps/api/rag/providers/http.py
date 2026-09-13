@@ -2,7 +2,15 @@ from math import isfinite
 
 import httpx
 
-from rag.providers.errors import ProviderError
+from rag.providers.base import ChatMessage, ProviderError
+
+
+def chat_payload(model: str, messages: list[ChatMessage], stream: bool) -> dict:
+    return {
+        "model": model,
+        "messages": [{"role": item.role, "content": item.content} for item in messages],
+        "stream": stream,
+    }
 
 
 async def provider_request(client: httpx.AsyncClient, method: str, url: str, **kwargs):

@@ -4,12 +4,21 @@ export const dynamic = "force-dynamic";
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
-  // Fixed allowlist: this route cannot become an arbitrary URL proxy or expose internal callbacks.
+  // Fixed allowlist: this route cannot become an arbitrary URL proxy or expose internal
+  // callbacks. Every dashboard call must have an entry here or it 404s before reaching
+  // the API, so add to this list whenever the dashboard learns a new endpoint.
   const route = path.join("/");
-  const allowed = route === "v1/me" || route === "v1/knowledge-bases" ||
-    route === "v1/chat" || route === "v1/chat/stream" ||
-    /^v1\/knowledge-bases\/[0-9a-f-]{36}(?:\/documents)?$/i.test(route) ||
-    /^v1\/ingestion-jobs\/[0-9a-f-]{36}(?:\/process)?$/i.test(route);
+  const id = "[0-9a-f-]{36}";
+  const allowed = [
+    /^v1\/me$/,
+    /^v1\/knowledge-bases$/,
+    /^v1\/chat\/stream$/,
+    /^v1\/chatbots$/,
+    new RegExp(`^v1/knowledge-bases/${id}(?:/documents)?$`, "i"),
+    new RegExp(`^v1/chatbots/${id}$`, "i"),
+    new RegExp(`^v1/documents/${id}(?:/reindex)?$`, "i"),
+    new RegExp(`^v1/ingestion-jobs/${id}(?:/process)?$`, "i"),
+  ].some((pattern) => pattern.test(route));
   if (!allowed) return Response.json({ detail: "Not found" }, { status: 404 });
   const headers = new Headers();
   const contentType = request.headers.get("content-type");

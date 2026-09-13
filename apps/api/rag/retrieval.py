@@ -3,6 +3,7 @@ from uuid import UUID
 
 from sqlalchemy import Connection, text
 
+from rag.db import vector_literal
 from rag.providers.base import EmbeddingModel
 
 
@@ -15,10 +16,6 @@ class RetrievedChunk:
     page_number: int | None
     section: str | None
     score: float
-
-
-def _vector(values: list[float]) -> str:
-    return "[" + ",".join(format(value, ".9g") for value in values) + "]"
 
 
 def reciprocal_rank_fusion(
@@ -72,7 +69,7 @@ async def retrieve(
                 LIMIT :candidate_limit
             """),
             {
-                "embedding": _vector(query_vector),
+                "embedding": vector_literal(query_vector),
                 "kb_id": knowledge_base_id,
                 "dimensions": model.dimensions,
                 "minimum": semantic_min_score,

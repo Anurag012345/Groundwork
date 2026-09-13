@@ -16,6 +16,10 @@ def engine():
     )
 
 
+def vector_literal(values: list[float]) -> str:
+    return "[" + ",".join(format(value, ".9g") for value in values) + "]"
+
+
 def set_tenant(connection, tenant_id: UUID):
     # Transaction-scoped: safe with PgBouncer and concurrent function invocations.
     connection.execute(

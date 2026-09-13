@@ -4,36 +4,18 @@ import json
 import httpx
 import pytest
 
-from rag.providers.base import ChatMessage
-from rag.providers.errors import ProviderError
+from rag.providers.base import ChatMessage, ProviderError
 from rag.providers.ollama import OllamaChatModel, OllamaEmbeddingModel
 from rag.providers.openai_compatible import OpenAICompatibleChatModel
-
-
-def test_openai_compatible_chat_normalizes_request():
-    async def exercise():
-        async def handler(request: httpx.Request):
-            assert request.url.path == "/v1/chat/completions"
-            data = json.loads(request.content)
-            assert data["model"] == "example-chat"
-            assert data["messages"] == [{"role": "user", "content": "Hello"}]
-            return httpx.Response(200, json={"choices": [{"message": {"content": "Hi"}}]})
-
-        model = OpenAICompatibleChatModel("https://models.test/v1", "secret", "example-chat")
-        await model.client.aclose()
-        model.client = httpx.AsyncClient(
-            base_url="https://models.test/v1/", transport=httpx.MockTransport(handler)
-        )
-        assert await model.generate([ChatMessage("user", "Hello")]) == "Hi"
-        await model.client.aclose()
-
-    asyncio.run(exercise())
 
 
 def test_openai_compatible_chat_streams_tokens():
     async def exercise():
         async def handler(request: httpx.Request):
+            assert request.url.path == "/v1/chat/completions"
             data = json.loads(request.content)
+            assert data["model"] == "example-chat"
+            assert data["messages"] == [{"role": "user", "content": "Hi"}]
             assert data["stream"] is True
             content = (
                 'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'
@@ -42,7 +24,7 @@ def test_openai_compatible_chat_streams_tokens():
             )
             return httpx.Response(200, text=content)
 
-        model = OpenAICompatibleChatModel("https://models.test/v1", "secret", "chat")
+        model = OpenAICompatibleChatModel("https://models.test/v1", "secret", "example-chat")
         await model.client.aclose()
         model.client = httpx.AsyncClient(
             base_url="https://models.test/v1/", transport=httpx.MockTransport(handler)

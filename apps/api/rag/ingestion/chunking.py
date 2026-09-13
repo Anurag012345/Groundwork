@@ -20,9 +20,9 @@ class Chunk:
     section: str | None
 
 
-def approximate_tokens(text: str) -> list[str]:
+def count_tokens(text: str) -> int:
     """Stable provider-neutral token approximation used only for chunk boundaries."""
-    return TOKEN_PATTERN.findall(text)
+    return sum(1 for _ in TOKEN_PATTERN.finditer(text))
 
 
 def _units(text: str) -> list[str]:
@@ -40,7 +40,7 @@ def _split_long_unit(unit: str, limit: int) -> list[str]:
     current: list[str] = []
     for word in words:
         candidate = " ".join([*current, word])
-        if current and len(approximate_tokens(candidate)) > limit:
+        if current and count_tokens(candidate) > limit:
             pieces.append(" ".join(current))
             current = [word]
         else:
@@ -64,7 +64,7 @@ def chunk_sections(
             continue
         units: list[str] = []
         for unit in _units(source.content):
-            if len(approximate_tokens(unit)) > max_tokens:
+            if count_tokens(unit) > max_tokens:
                 units.extend(_split_long_unit(unit, max_tokens))
             else:
                 units.append(unit)
@@ -72,20 +72,20 @@ def chunk_sections(
         current: list[str] = []
         for unit in units:
             candidate = " ".join([*current, unit])
-            if current and len(approximate_tokens(candidate)) > max_tokens:
+            if current and count_tokens(candidate) > max_tokens:
                 content = " ".join(current)
                 output.append(
                     Chunk(
                         ordinal=len(output),
                         content=content,
-                        token_count=len(approximate_tokens(content)),
+                        token_count=count_tokens(content),
                         page_number=source.page_number,
                         section=source.heading,
                     )
                 )
                 overlap: list[str] = []
                 for prior in reversed(current):
-                    if len(approximate_tokens(" ".join([prior, *overlap]))) > overlap_tokens:
+                    if count_tokens(" ".join([prior, *overlap])) > overlap_tokens:
                         break
                     overlap.insert(0, prior)
                 current = [*overlap, unit]
@@ -97,7 +97,7 @@ def chunk_sections(
                 Chunk(
                     ordinal=len(output),
                     content=content,
-                    token_count=len(approximate_tokens(content)),
+                    token_count=count_tokens(content),
                     page_number=source.page_number,
                     section=source.heading,
                 )

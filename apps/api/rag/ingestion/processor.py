@@ -4,10 +4,10 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 
 from rag.config import Settings
-from rag.db import assert_runtime_role, engine, set_tenant
+from rag.db import assert_runtime_role, engine, set_tenant, vector_literal
 from rag.ingestion.chunking import Chunk, chunk_sections
 from rag.ingestion.parsers import DocumentParseError, parse_document
-from rag.providers.errors import ProviderError
+from rag.providers.base import ProviderError
 from rag.providers.factory import embedding_model
 from rag.storage import LocalStorage
 
@@ -42,13 +42,8 @@ class IngestionResult:
     status: str
 
 
-def _connection(tenant_id: UUID):
-    connection = engine().begin()
-    return connection
-
-
 def _claim(tenant_id: UUID, job_id: UUID, lease_seconds: int) -> JobSource | IngestionResult:
-    with _connection(tenant_id) as connection:
+    with engine().begin() as connection:
         assert_runtime_role(connection)
         set_tenant(connection, tenant_id)
         row = (
@@ -115,7 +110,7 @@ def _claim(tenant_id: UUID, job_id: UUID, lease_seconds: int) -> JobSource | Ing
 
 
 def _stage(tenant_id: UUID, source: JobSource, job_stage: str, version_status: str) -> None:
-    with _connection(tenant_id) as connection:
+    with engine().begin() as connection:
         assert_runtime_role(connection)
         set_tenant(connection, tenant_id)
         connection.execute(
@@ -126,10 +121,6 @@ def _stage(tenant_id: UUID, source: JobSource, job_stage: str, version_status: s
             text("UPDATE document_versions SET status=:status WHERE id=:id"),
             {"status": version_status, "id": source.version_id},
         )
-
-
-def _vector(values: list[float]) -> str:
-    return "[" + ",".join(format(value, ".9g") for value in values) + "]"
 
 
 def _finalize(
@@ -147,11 +138,11 @@ def _finalize(
             "token_count": chunk.token_count,
             "page_number": chunk.page_number,
             "section": chunk.section,
-            "embedding": _vector(vector),
+            "embedding": vector_literal(vector),
         }
         for chunk, vector in zip(chunks, vectors, strict=True)
     ]
-    with _connection(tenant_id) as connection:
+    with engine().begin() as connection:
         assert_runtime_role(connection)
         set_tenant(connection, tenant_id)
         status = connection.execute(
@@ -208,7 +199,7 @@ def _finalize(
 
 def _fail(tenant_id: UUID, source: JobSource, error: Exception) -> None:
     message = str(error).strip()[:1000] or "Ingestion failed"
-    with _connection(tenant_id) as connection:
+    with engine().begin() as connection:
         assert_runtime_role(connection)
         set_tenant(connection, tenant_id)
         connection.execute(

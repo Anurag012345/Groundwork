@@ -1,6 +1,6 @@
 import pytest
 
-from rag.ingestion.chunking import Section, approximate_tokens, chunk_sections
+from rag.ingestion.chunking import Section, chunk_sections, count_tokens
 
 
 def test_chunking_preserves_metadata_and_order():
@@ -21,7 +21,7 @@ def test_long_content_is_bounded():
     content = " ".join(f"word{index}" for index in range(50))
     chunks = chunk_sections([Section(content)], max_tokens=16, overlap_tokens=2)
     assert len(chunks) == 4
-    assert all(len(approximate_tokens(chunk.content)) <= 16 for chunk in chunks)
+    assert all(count_tokens(chunk.content) <= 16 for chunk in chunks)
 
 
 @pytest.mark.parametrize(("maximum", "overlap"), [(15, 0), (20, -1), (20, 20), (20, 21)])

@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from typing import Literal
 
 
+class ProviderError(RuntimeError):
+    """A normalized model-provider failure safe for application handling."""
+
+
 @dataclass(frozen=True)
 class ChatMessage:
     role: Literal["system", "user", "assistant"]
@@ -12,19 +16,13 @@ class ChatMessage:
 
 class ChatModel(ABC):
     @abstractmethod
-    async def generate(self, messages: list[ChatMessage]) -> str:
-        """Generate a complete response."""
-
-    @abstractmethod
     async def stream(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
         """Yield response text as it becomes available."""
 
 
 class EmbeddingModel(ABC):
-    @property
-    @abstractmethod
-    def dimensions(self) -> int:
-        """Return the exact vector dimensions produced by this model."""
+    # Set by each adapter: the exact vector dimensions it produces.
+    dimensions: int
 
     @abstractmethod
     async def embed(self, texts: list[str]) -> list[list[float]]:
