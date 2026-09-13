@@ -175,9 +175,24 @@ Not defects, but worth knowing:
 - **OpenAI-compatible providers need `/v1` on the base URL and a non-empty key.**
   Also noted in `.env.example`.
 
-Not exercised: PDF, DOCX, and HTML parsing (only Markdown was uploaded), the
-document delete and reindex endpoints, rate limiting under real load, and
-anything over TLS.
+A second pass the same day, against the image rebuilt after the `APP_ENV`
+removal: a hand-written PDF (1 chunk, page number in the citation) and a
+python-docx DOCX (2 chunks, headings as sections) both parsed and answered
+correctly, including a question whose answer lived only in the PDF. Reindex
+opened version 2, refused a second reindex with 409 while it was queued, and
+version 1 stayed active until version 2 finished. Delete returned 204, left zero
+rows in `documents`, `document_versions`, `chunks`, and `ingestion_jobs`, removed
+the stored file, and returned 404 the second time.
+
+One ceiling surfaced by the reindex: version 1's chunks and embeddings stay in
+`chunks` after version 2 goes active. Retrieval filters on `active_version_id`
+so answers are unaffected, but nothing reclaims them, and a document reindexed
+n times holds n copies. Marked with a `ponytail:` comment at the finalize step
+in `processor.py`; a reaper is a feature for when a client reindexes enough to
+notice.
+
+Not exercised: HTML parsing, rate limiting under real load, and anything over
+TLS.
 
 ### Widget — built and exercised 2026-09-13
 
@@ -276,7 +291,8 @@ question per client before quoting the work.
 ## Next actions, in order
 
 Done since the previous list: the Linux run (item 2), the integration test
-(item 7), and the `APP_ENV` gate (item 6), all on 2026-09-13.
+(item 7), the `APP_ENV` gate (item 6), and PDF/DOCX/reindex/delete through the
+running stack, all on 2026-09-13.
 
 1. **Push to a remote.** There is still exactly one copy of this repository, on
    one disk. Five minutes, and it stops a disk failure from being total loss.
@@ -288,9 +304,6 @@ Done since the previous list: the Linux run (item 2), the integration test
    to the client's server. The WSL notes above are the first draft of the
    "what goes wrong" section.
 4. **Add document list, delete, and reindex controls to the dashboard.** The
-   endpoints exist; the dashboard has upload only. Exercise delete and reindex
-   against the database while doing it — they have not run.
-5. **Upload a PDF and a DOCX** through the running stack. Only Markdown has
-   been through the parsers for real.
-6. **Reconcile `IMPLEMENTATION_ROADMAP.md`** with the code; it still assumes the
+   endpoints exist and now have run; the dashboard has upload only.
+5. **Reconcile `IMPLEMENTATION_ROADMAP.md`** with the code; it still assumes the
    Vercel hosted model. The README is now current.

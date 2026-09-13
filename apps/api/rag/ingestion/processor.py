@@ -176,6 +176,10 @@ def _finalize(
             """),
             {"version_id": source.version_id},
         )
+        # ponytail: the previous version's chunks and embeddings stay in the table
+        # after this repoint. Retrieval ignores them, but nothing reclaims them, so
+        # a document reindexed n times holds n copies. Delete superseded versions
+        # here once a client reindexes often enough for the table to matter.
         connection.execute(
             text("UPDATE documents SET active_version_id=:version_id WHERE id=:document_id"),
             {"version_id": source.version_id, "document_id": source.document_id},
