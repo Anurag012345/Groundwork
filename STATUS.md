@@ -17,15 +17,12 @@ trust this file: both of those have drifted from the code.
 ~1,800 lines across a FastAPI backend and a Next.js dashboard. The code is
 tidy and the automated checks are green.
 
-## Highest-severity item: nothing is committed
+## Version control
 
-```
-fatal: your current branch 'master' does not have any commits yet
-```
-
-11 untracked entries. The entire project exists in one unversioned copy on one
-disk. Fix this before anything else. Note the branch is `master`; the Duoforge
-repo uses `main`.
+Committed 2026-09-13 as the repository's first commit: 60 files, 4,403 lines.
+Before that the whole project was one unversioned copy on one disk. There is
+still no remote, so it remains a single copy — just a versioned one. Branch is
+`master`; Duoforge uses `main`.
 
 ## The isolation claim is unverified
 
@@ -74,45 +71,91 @@ That is a complete, correct RAG loop. The retrieval design is better than most
 tutorial projects: per-KB pinned embedding space, RRF hybrid search, a relevance
 floor, and retrieved text treated as untrusted data.
 
-## Blockers for shipping this as a hosted product
+## Delivery model: installed on each client's own server
 
-1. **No embeddable widget.** Checkpoint 9 is entirely unstarted. If the product
-   is "a chatbot for your website," the widget *is* the product.
-2. **Local-filesystem storage.** `rag/storage.py` `LocalStorage` writes under
-   `STORAGE_ROOT=data/uploads`. This breaks on Vercel and violates the project's
-   own non-negotiable about durable state.
-3. **Synchronous ingestion.** `page.tsx` calls `POST /v1/ingestion-jobs/{id}/process`
-   inline right after upload. No queue, so a real document blows the function
-   time limit. The job/stage/lease schema for doing this properly already exists
-   — only the delivery mechanism is missing.
-4. **No login or self-serve signup.** API keys only, minted by `rag.bootstrap`,
-   a CLI with no endpoint. Every customer has to be onboarded by hand.
-5. **Nothing deployed.** `vercel.json` files are templates; no project linked.
+Not a hosted SaaS. Each client gets their own deployment on their own hardware,
+configured to their requirements. That changes which work is required.
 
-Scale note, not a defect: `chunks.embedding` is an unconstrained `vector` with no
-HNSW/ivfflat index, so search is a sequential scan. The roadmap chose exact
-search for the first release deliberately. Add an index when a tenant's corpus
-makes it hurt.
+### Dropped off the critical path
 
-## Two routes to "finish"
+- **Multi-tenancy as a load-bearing claim.** One client per install means one
+  tenant per database. The RLS work still stands and is still good, but it is no
+  longer the claim that carries legal weight. See the caveat below.
+- **Private Blob storage.** `LocalStorage` writing to a real disk on a real
+  server is the correct answer, not a compromise.
+- **QStash / staged queue delivery.** No serverless function time limit to fit
+  inside.
+- **Billing and usage metering.** Invoiced per installation, not per token.
+- **Login, signup, self-serve onboarding.** You install it; you run
+  `rag.bootstrap` once during setup.
 
-**Showcase it as a built project** (days): commit everything, install Docker,
-run the quick start, run the isolation integration test, record a demo, write up
-the architecture. Items 1–5 above are not needed. This is reachable now.
+Checkpoint 11 (Vercel deployment readiness) is now almost entirely irrelevant.
+Docker Compose is the installer.
 
-**Sell it as a hosted SaaS** (weeks): all five blockers, plus usage metering,
-conversation history, and a security pass. The foundation is sound enough to
-carry that, but it is a different project's worth of work.
+### Moved onto the critical path
 
-The showcase route is assumed below unless you say otherwise. For the Duoforge
-site, this slots in as a product page backed by a real demo — the existing
-dashboard screenshots and a short ingest-then-ask video carry it.
+1. **The embeddable widget.** Unchanged and still unstarted. If the product is a
+   chatbot for the client's website, the widget is the product surface. Nothing
+   about on-prem touches this.
+2. **Compose must work from a clean checkout on Linux.** It is now the installer
+   and it has never been verified. Known defects below.
+3. **TLS and reverse proxy.** Nothing in `compose.yaml` terminates TLS and every
+   port binds `127.0.0.1`. A widget on the client's HTTPS site cannot call an
+   HTTP API.
+4. **A handover-quality upgrade and backup procedure.** You will not have shell
+   access to their server. Migrations, restore, and diagnosing a failure all have
+   to be something the client can run or that you can walk them through.
+5. **Hardware sizing.** Does the client run Ollama on their own GPU, or bring an
+   OpenAI-compatible API key? Both are already supported in code — a genuine
+   strength of the provider abstraction — but the requirement has to be settled
+   per client before install.
 
-## Next four actions
+### Known defects in the installer
 
-1. `git add -A && git commit` — today.
-2. Install Docker Desktop, run the documented quick start, confirm the stack
-   comes up from a clean checkout.
-3. Run `pytest -m integration -q` with both test URLs set. This either proves
-   the headline claim or finds the bug that matters most.
-4. Reconcile `README.md` and `IMPLEMENTATION_ROADMAP.md` with the code.
+- **`host.docker.internal` does not resolve on Linux.** The Ollama defaults in
+  `compose.yaml` and `.env.example` point at it, and client servers are Linux.
+  Needs `extra_hosts: ["host.docker.internal:host-gateway"]` on the `api`
+  service. As shipped, the default model provider silently fails to resolve on
+  the target platform.
+- **No `restart: unless-stopped` on any service.** The client's server reboots,
+  the stack stays down.
+- **`redis` and `qstash` are dead services.** Neither is referenced anywhere in
+  the code. Two containers a client would run for nothing — delete them or mark
+  them reserved.
+- **`CORS_ORIGINS` is hardcoded** to `http://localhost:3000` in the `api`
+  service. Must be configurable before the widget can run on a client domain.
+  This is coupled to the widget work, not separate from it.
+- **Backup targets are undocumented.** The `postgres_data` volume and the
+  `./data` bind mount are the two things a client backup must cover.
+- **`APP_ENV` gates the wrong axis.** `app.py:251` and `app.py:368` return 501
+  outside development. Compose pins `development`, so uploads work as shipped —
+  but the gate should key off the storage backend, not the environment name.
+  About an hour's change, not a blocker.
+
+### The caveat that could reverse all of this
+
+Isolation dropping in priority holds **only** while it is one client per
+install. If any client wants several departments, brands, or subsidiaries
+separated inside one deployment, RLS becomes load-bearing again and the unrun
+integration test goes straight back to the top of this file. Settle that
+question per client before quoting the work.
+
+## Next actions, in order
+
+1. **Fix the four installer defects** — `extra_hosts` for Linux, restart
+   policies, drop the dead `redis`/`qstash` services, make `CORS_ORIGINS`
+   configurable. Under a day, and it unblocks every install.
+2. **Install Docker and run the stack from a clean checkout on Linux.** This is
+   the installer; it has never been executed. Expect to find more than the four
+   defects above.
+3. **Build the widget.** Largest gap between here and anything sellable, and
+   building it will surface the CORS, TLS, and token-exchange decisions rather
+   than leaving them theoretical.
+4. **Settle TLS and reverse proxy** as part of the compose story, since the
+   widget needs HTTPS.
+5. **Write the install, upgrade, and backup runbook.** You will not have access
+   to the client's server.
+6. **Run `pytest -m integration -q`** — priority depends entirely on whether any
+   client needs multiple tenants in one install.
+7. **Reconcile `README.md` and `IMPLEMENTATION_ROADMAP.md`** with the code; both
+   still assume the Vercel hosted model.
