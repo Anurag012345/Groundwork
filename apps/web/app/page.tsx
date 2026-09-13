@@ -6,11 +6,13 @@ type KnowledgeBase = { id: string; name: string; description: string; created_at
 type Tenant = { id: string; name: string };
 type ChatSource = { id: number; document_name: string; page_number?: number; section?: string; excerpt: string };
 type Chatbot = { id: string; public_key: string; name: string; greeting: string; allowed_origins: string[]; knowledge_base_id: string };
+type Doc = { id: string; name: string; version: number; status: string; error_message: string | null };
 
 export default function Home() {
   const [key, setKey] = useState("");
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [bases, setBases] = useState<KnowledgeBase[]>([]);
+  const [docs, setDocs] = useState<Record<string, Doc[]>>({});
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
@@ -52,8 +54,14 @@ export default function Home() {
       setTenant(identity); setBases(data.items); setBots(botList.items);
       setChatBase(data.items[0]?.id || "");
       setBotBase(data.items[0]?.id || "");
+      await Promise.all(data.items.map((base: KnowledgeBase) => loadDocs(base.id)));
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
+  }
+
+  async function loadDocs(baseId: string) {
+    const data = await api(`knowledge-bases/${baseId}/documents`);
+    setDocs((current) => ({ ...current, [baseId]: data.items }));
   }
 
   async function create(event: FormEvent) {
@@ -97,7 +105,28 @@ export default function Home() {
       const processed = await api(`ingestion-jobs/${data.job_id}/process`, "POST");
       setNotice(`${data.name} is ready with ${processed.chunk_count} searchable chunks.`);
     } catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
+    finally { setBusy(false); void loadDocs(base.id).catch(() => undefined); }
+  }
+
+  async function reindex(base: KnowledgeBase, doc: Doc) {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const queued = await api(`documents/${doc.id}/reindex`, "POST");
+      setNotice(`${doc.name} is being reindexed. The current version keeps answering until it finishes…`);
+      const processed = await api(`ingestion-jobs/${queued.job_id}/process`, "POST");
+      setNotice(`${doc.name} reindexed with ${processed.chunk_count} searchable chunks.`);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); void loadDocs(base.id).catch(() => undefined); }
+  }
+
+  async function removeDoc(base: KnowledgeBase, doc: Doc) {
+    if (!window.confirm(`Delete "${doc.name}"? Chatbots will stop answering from it immediately.`)) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      await api(`documents/${doc.id}`, "DELETE");
+      setNotice(`${doc.name} deleted.`);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); void loadDocs(base.id).catch(() => undefined); }
   }
 
   function snippet(bot: Chatbot) {
@@ -199,7 +228,7 @@ export default function Home() {
       {!tenant ? <section className="connect panel"><div><span className="section-number">01 / CONNECT</span><h2>Open your workspace</h2><p>Enter your organization’s API key to manage its knowledge bases.</p><p className="muted">Your key stays in this browser tab’s memory and is cleared when you disconnect or refresh.</p></div><form onSubmit={connect}><label htmlFor="key">Workspace API key</label><input id="key" type="password" autoComplete="off" required value={key} onChange={(e) => setKey(e.target.value)} placeholder="rag_…" /><button disabled={busy}>{busy ? "Connecting…" : "Connect workspace →"}</button></form></section> :
       <><div className="section-top"><h2>Knowledge bases <span className="count">{bases.length}</span></h2><button className="secondary" disabled={busy} onClick={() => { setTenant(null); setKey(""); setBases([]); setBots([]); setError(""); setNotice(""); }}>Disconnect</button></div>
         <div className="content-grid"><section className="bases">
-          {bases.length === 0 ? <div className="empty panel"><div className="empty-icon">▤</div><h3>Your first knowledge base starts here</h3><p>Give it a name, like “Customer support” or “Product documentation”.</p></div> : bases.map((base) => <article className="base panel" key={base.id}><span className="folder">▤</span><h3>{base.name}</h3><p>{base.description || "No description yet."}</p><label className="upload">Add a document<input type="file" disabled={busy} accept=".pdf,.docx,.txt,.md,.html,.htm" onChange={(event) => { void upload(base, event.target.files?.[0]); event.target.value = ""; }} /></label><footer><span>Created {new Date(base.created_at).toLocaleDateString()}</span><button className="delete" disabled={busy} onClick={() => remove(base)} aria-label={"Delete " + base.name}>Delete</button></footer></article>)}
+          {bases.length === 0 ? <div className="empty panel"><div className="empty-icon">▤</div><h3>Your first knowledge base starts here</h3><p>Give it a name, like “Customer support” or “Product documentation”.</p></div> : bases.map((base) => <article className="base panel" key={base.id}><span className="folder">▤</span><h3>{base.name}</h3><p>{base.description || "No description yet."}</p>{(docs[base.id] || []).length > 0 && <ul className="docs">{docs[base.id].map((doc) => <li key={doc.id}><span>{doc.name}</span><span className={"status" + (doc.status === "failed" ? " failed" : "")} title={doc.error_message || undefined}>{doc.status}{doc.version > 1 && ` · v${doc.version}`}</span><button className="secondary" type="button" disabled={busy || doc.status === "queued"} onClick={() => reindex(base, doc)} aria-label={"Reindex " + doc.name}>Reindex</button><button className="delete" type="button" disabled={busy} onClick={() => removeDoc(base, doc)} aria-label={"Delete " + doc.name}>Delete</button></li>)}</ul>}<label className="upload">Add a document<input type="file" disabled={busy} accept=".pdf,.docx,.txt,.md,.html,.htm" onChange={(event) => { void upload(base, event.target.files?.[0]); event.target.value = ""; }} /></label><footer><span>Created {new Date(base.created_at).toLocaleDateString()}</span><button className="delete" disabled={busy} onClick={() => remove(base)} aria-label={"Delete " + base.name}>Delete</button></footer></article>)}
         </section><form className="panel create" onSubmit={create}><span className="section-number">NEW COLLECTION</span><h2>Create a knowledge base</h2><label htmlFor="name">Name</label><input id="name" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} placeholder="e.g. Customer support" required /><label htmlFor="description">Description <span className="optional">(optional)</span></label><textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={1000} placeholder="What belongs in this collection?" rows={4} /><button disabled={busy || !name.trim()}>{busy ? "Working…" : "Create knowledge base +"}</button></form></div></>}
       {tenant && <section className="playground panel"><div><span className="section-number">RAG PLAYGROUND</span><h2>Ask your knowledge base</h2><p>Answers use only active, indexed documents and include their sources.</p></div><form onSubmit={ask}><label htmlFor="chat-base">Knowledge base</label><select id="chat-base" value={chatBase} onChange={(event) => setChatBase(event.target.value)} disabled={busy || bases.length === 0}>{bases.length === 0 && <option value="">Create a knowledge base first</option>}{bases.map((base) => <option key={base.id} value={base.id}>{base.name}</option>)}</select><label htmlFor="question">Question</label><textarea id="question" value={question} onChange={(event) => setQuestion(event.target.value)} rows={3} maxLength={4000} placeholder="What would you like to know?" required /><button disabled={busy || !chatBase || !question.trim()}>{busy ? "Working…" : "Ask question →"}</button></form>{answer && <div className="answer"><span>ANSWER</span><p>{answer}</p>{sources.length > 0 && <ol>{sources.map((source) => <li key={source.id}><strong>[{source.id}] {source.document_name}</strong>{source.page_number && ` · page ${source.page_number}`}{source.section && ` · ${source.section}`}<small>{source.excerpt}</small></li>)}</ol>}</div>}</section>}
       {tenant && <section className="bots panel">
