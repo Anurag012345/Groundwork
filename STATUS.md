@@ -180,13 +180,16 @@ PostgreSQL, or Ollama on this machine, and a `file://` harness cannot be driven 
 the browser tooling. **Nobody has seen this widget run.** Treat it as written and
 type-checked, not as working.
 
+The dashboard can now create, list, copy the snippet for, and delete chatbots.
+It asks the operator for the API's public address, because the dashboard reaches
+the API through a server-side proxy and so cannot discover where a visitor's
+browser should load the widget from.
+
 ### Deliberately left out
 
-- **Dashboard UI for creating chatbots.** The API endpoints exist; the management
-  screen does not. Create one with `POST /v1/chatbots` for now.
+- **Branding and theming.** Colours are fixed in `widget.js`.
 - **Conversation history.** Each question is independent; there is no follow-up
   context and nothing is stored.
-- **Branding and theming.** Colours are fixed in `widget.js`.
 
 ### The caveat that could reverse all of this
 
