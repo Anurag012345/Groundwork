@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Example client website</title>
+<style>
+  /* Deliberately hostile page styles. None of this may reach inside the widget:
+     if the chat panel turns pink or its button rotates, Shadow DOM isolation has
+     failed and the widget will break on real client sites. */
+  * { font-family: "Comic Sans MS", cursive !important; }
+  main div { background: #ff00ff !important; border: 4px dashed lime !important; }
+  main button { transform: rotate(8deg) !important; font-size: 30px !important; }
+  main input { display: none !important; }
+  body { margin: 0; padding: 40px; background: #fffbe6; color: #18181b; }
+  h1 { font-size: 24px; }
+  code { background: #18181b; color: #fff; padding: 2px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>An example client website</h1>
+  <p>This page stands in for a customer's own site. Serve it over HTTP and add its
+  origin to the chatbot's allowlist:</p>
+  <pre><code>python -m http.server 5500 --directory examples</code></pre>
+  <p>Then create a chatbot whose <code>allowed_origins</code> contains
+  <code>http://localhost:5500</code>, put its public key in the script tag at the
+  bottom of this file, and reload.</p>
+  <p>The pink boxes and rotated button below are this page's own CSS, applied to
+  prove the widget is not affected by them.</p>
+  <div><button>Host page button</button><input value="host input"></div>
+</main>
+
+<!-- The embed snippet a client pastes into their site. data-api is only needed when
+     the API is served from a different origin than this script. -->
+<script src="http://localhost:8000/widget.js"
+        data-key="REPLACE_WITH_YOUR_PUBLIC_KEY"
+        data-api="http://localhost:8000"
+        defer></script>
+</body>
+</html>

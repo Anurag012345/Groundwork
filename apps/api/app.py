@@ -2,17 +2,20 @@ import hashlib
 import json
 import logging
 import re
+import time
+from collections import defaultdict, deque
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, File, HTTPException, Response, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from rag.chat import FALLBACK_ANSWER, citation_payload, grounding_messages
 from rag.config import settings
@@ -22,7 +25,7 @@ from rag.ingestion.processor import IngestionBusy, IngestionFailed, process_inge
 from rag.providers.errors import ProviderError
 from rag.providers.factory import chat_model, embedding_model
 from rag.retrieval import retrieve
-from rag.security import SessionDependency
+from rag.security import SessionDependency, WidgetDependency, new_public_key
 from rag.storage import LocalStorage
 
 app = FastAPI(title="RAG Service API", version="0.1.0")
@@ -35,9 +38,32 @@ app.add_middleware(
 
 
 @app.middleware("http")
+async def public_cors(request, call_next):
+    origin = request.headers.get("origin")
+    if not request.url.path.startswith("/public/") or not origin:
+        return await call_next(request)
+    if request.method == "OPTIONS":
+        # Preflight is not the security boundary: the real request checks the
+        # chatbot's allowlist and returns 403 before any data is produced.
+        return Response(
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Max-Age": "600",
+            } | {"Access-Control-Allow-Origin": origin, "Vary": "Origin"},
+        )
+    response = await call_next(request)
+    if response.status_code < 400:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+    return response
+
+
+@app.middleware("http")
 async def no_cache(request, call_next):
     response = await call_next(request)
-    response.headers["Cache-Control"] = "no-store"
+    response.headers.setdefault("Cache-Control", "no-store")
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 
@@ -133,6 +159,34 @@ async def prepare_grounded_chat(data: ChatInput, connection):
     finally:
         await embeddings.client.aclose()
     return grounding_messages(data.question, chunks), citation_payload(chunks)
+
+
+_asked: dict[str, deque[float]] = defaultdict(deque)
+
+
+def client_address(request: Request) -> str:
+    # ponytail: the socket peer, so behind a reverse proxy every visitor shares one
+    # bucket. Read a trusted forwarded-for header once a proxy is actually in front.
+    return request.client.host if request.client else "unknown"
+
+
+def rate_limit(bucket: str, limit: int = 20, window: float = 60.0):
+    # ponytail: in-process counters, so the limit is per uvicorn worker. Move the
+    # window into PostgreSQL if an install ever runs more than one.
+    now = time.monotonic()
+    asked = _asked[bucket]
+    while asked and now - asked[0] > window:
+        asked.popleft()
+    if len(asked) >= limit:
+        raise HTTPException(429, "Too many questions just now. Please wait a moment.")
+    asked.append(now)
+    # Buckets are per visitor address, so without this the dictionary grows for the
+    # life of the process. Only the touched bucket ages on its own; the rest keep
+    # their timestamps forever and never empty, so sweep by age instead.
+    # ponytail: a full sweep per request, which is nothing at on-prem visitor
+    # counts. Sample it, or move the window into PostgreSQL, if that stops holding.
+    for idle in [key for key, hits in _asked.items() if not hits or now - hits[-1] > window]:
+        del _asked[idle]
 
 
 def sse_event(event: str, data) -> str:
@@ -418,4 +472,132 @@ async def stream_chat(data: ChatInput, session: SessionDependency):
         events(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+class ChatbotInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    knowledge_base_id: UUID
+    name: str = Field(min_length=1, max_length=120)
+    greeting: str = Field(default="", max_length=500)
+    # No default: a chatbot with no origins answers nowhere, so this is a real choice.
+    allowed_origins: list[str] = Field(min_length=1, max_length=20)
+
+
+class QuestionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    question: str = Field(min_length=1, max_length=4000)
+
+
+def check_origin_format(origins: list[str]) -> list[str]:
+    for origin in origins:
+        parsed = urlparse(origin)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.path:
+            raise HTTPException(
+                422, f"'{origin}' must be a scheme and host only, such as https://example.com"
+            )
+    return origins
+
+
+@app.post("/v1/chatbots", status_code=201)
+def create_chatbot(data: ChatbotInput, session: SessionDependency):
+    chatbot_id, public_key = uuid4(), new_public_key(session.tenant_id)
+    try:
+        row = (
+            session.connection.execute(
+                text("""
+                    INSERT INTO chatbots
+                        (id, tenant_id, knowledge_base_id, public_key, name, greeting,
+                         allowed_origins)
+                    VALUES (:id, :tenant, :kb, :key, :name, :greeting, :origins)
+                    RETURNING id, public_key, name, greeting, allowed_origins, created_at
+                """),
+                {
+                    "id": chatbot_id,
+                    "tenant": session.tenant_id,
+                    "kb": data.knowledge_base_id,
+                    "key": public_key,
+                    "name": data.name,
+                    "greeting": data.greeting,
+                    "origins": check_origin_format(data.allowed_origins),
+                },
+            )
+            .mappings()
+            .one()
+        )
+    except IntegrityError:
+        # The composite foreign key refuses a knowledge base belonging to anyone else.
+        raise HTTPException(404, "Knowledge base not found") from None
+    return dict(row)
+
+
+@app.get("/v1/chatbots")
+def chatbots(session: SessionDependency):
+    rows = session.connection.execute(
+        text("""
+            SELECT id, public_key, name, greeting, allowed_origins, knowledge_base_id,
+                   is_active, created_at
+            FROM chatbots ORDER BY created_at DESC
+        """)
+    ).mappings()
+    return {"items": [dict(row) for row in rows]}
+
+
+@app.delete("/v1/chatbots/{chatbot_id}", status_code=204)
+def delete_chatbot(chatbot_id: UUID, session: SessionDependency):
+    deleted = session.connection.execute(
+        text("DELETE FROM chatbots WHERE id=:id RETURNING id"), {"id": chatbot_id}
+    ).scalar_one_or_none()
+    if deleted is None:
+        raise HTTPException(404, "Chatbot not found")
+    return Response(status_code=204)
+
+
+@app.get("/public/v1/chatbots/{public_key}")
+def public_chatbot(widget: WidgetDependency):
+    return {"name": widget.chatbot["name"], "greeting": widget.chatbot["greeting"]}
+
+
+@app.post("/public/v1/chatbots/{public_key}/chat")
+async def public_chat(data: QuestionInput, request: Request, widget: WidgetDependency):
+    rate_limit(f"{widget.chatbot['id']}:{client_address(request)}")
+    # The knowledge base comes from the chatbot row. A visitor editing the request
+    # body cannot reach a different knowledge base, even inside the same tenant.
+    question = ChatInput(
+        knowledge_base_id=widget.chatbot["knowledge_base_id"],
+        question=data.question,
+    )
+    messages, sources = await prepare_grounded_chat(question, widget.connection)
+
+    async def events():
+        if not messages:
+            yield sse_event("token", {"text": FALLBACK_ANSWER})
+            yield sse_event("sources", [])
+            yield sse_event("done", {})
+            return
+        generator = chat_model(settings())
+        try:
+            async for token in generator.stream(messages):
+                yield sse_event("token", {"text": token})
+            yield sse_event("sources", sources)
+            yield sse_event("done", {})
+        except ProviderError:
+            logging.getLogger("rag").warning("Model provider stream failed")
+            yield sse_event("error", {"detail": "Model provider unavailable"})
+        finally:
+            await generator.client.aclose()
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/widget.js", include_in_schema=False)
+def widget_bundle():
+    return FileResponse(
+        Path(__file__).parent / "static" / "widget.js",
+        media_type="text/javascript",
+        headers={"Cache-Control": "public, max-age=300"},
     )

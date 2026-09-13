@@ -135,6 +135,59 @@ Still outstanding from the original list: `APP_ENV` gates the wrong axis.
 `development` so uploads work as shipped. The gate should key off the storage
 backend, not the environment name. About an hour, not a blocker.
 
+### Widget — built 2026-09-13, not yet exercised
+
+Migration `0004` adds `chatbots` (tenant, knowledge base, public key, greeting,
+origin allowlist) with the same ENABLE + FORCE + policy treatment as the earlier
+tables, and a composite foreign key so a chatbot cannot point at another tenant's
+knowledge base even if the application tried.
+
+Endpoints: `POST/GET/DELETE /v1/chatbots` on the authenticated path, and
+`GET /public/v1/chatbots/{public_key}` plus
+`POST /public/v1/chatbots/{public_key}/chat` (SSE) on the public one.
+`apps/api/static/widget.js` is 206 lines of dependency-free JavaScript in a shadow
+root, served at `/widget.js`. `examples/host-page.html` is a host page carrying
+deliberately hostile CSS to prove the isolation holds.
+
+Decisions worth knowing:
+
+- **Public keys are stored in plaintext and are not secrets.** They ship in the
+  client's page source by definition. Hashing would buy nothing and would stop the
+  dashboard showing the embed snippet. The tenant is embedded in the key exactly as
+  it is for administrative keys, which is what lets the chatbot be resolved before
+  any tenant context exists.
+- **No token exchange in this version.** A short-lived signed token's real gain is
+  origin binding, which the `Origin` allowlist already provides, and per-session
+  metering, which does not exist yet. Revisit when sessions need metering.
+- **The origin allowlist fails closed.** No `Origin` header, or an empty list, and
+  the chatbot answers nowhere. Creating one requires at least one origin.
+- **The visitor cannot choose the knowledge base.** The public endpoint accepts
+  only a question; the knowledge base is read from the chatbot row. This is the
+  request-tampering path that mattered most, and it is covered by a test.
+- **Rate limiting is in-process**, 20 questions per minute per visitor address. It
+  is therefore per uvicorn worker, and behind a reverse proxy every visitor shares
+  one bucket until a trusted forwarded-for header is read. Both marked in code.
+- **`assert_runtime_role` no longer hardcodes a table count.** It derives from
+  `TENANT_TABLES`, so adding a ninth table cannot silently 503 the whole API the
+  way adding the eighth would have.
+
+**What has not been verified.** The 22 new tests cover the origin allowlist, key
+separation, preflight ordering, rate limiting, and the knowledge-base discipline.
+They do not cover: that migration 0004 applies, that the runtime guard still passes
+at eight tables against live PostgreSQL, that SSE reaches a browser through the
+shadow root, or that the widget renders correctly anywhere. There is no Docker,
+PostgreSQL, or Ollama on this machine, and a `file://` harness cannot be driven by
+the browser tooling. **Nobody has seen this widget run.** Treat it as written and
+type-checked, not as working.
+
+### Deliberately left out
+
+- **Dashboard UI for creating chatbots.** The API endpoints exist; the management
+  screen does not. Create one with `POST /v1/chatbots` for now.
+- **Conversation history.** Each question is independent; there is no follow-up
+  context and nothing is stored.
+- **Branding and theming.** Colours are fixed in `widget.js`.
+
 ### The caveat that could reverse all of this
 
 Isolation dropping in priority holds **only** while it is one client per

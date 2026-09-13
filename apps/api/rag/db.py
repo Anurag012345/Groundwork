@@ -24,19 +24,29 @@ def set_tenant(connection, tenant_id: UUID):
     )
 
 
+TENANT_TABLES = (
+    "tenants",
+    "api_keys",
+    "knowledge_bases",
+    "documents",
+    "document_versions",
+    "chunks",
+    "ingestion_jobs",
+    "chatbots",
+)
+
+
 def assert_runtime_role(connection: Connection):
+    names = ", ".join(f"'{table}'" for table in TENANT_TABLES)
     safe = connection.execute(
-        text("""
+        text(f"""
         SELECT NOT (r.rolsuper OR r.rolbypassrls)
-          AND count(c.oid) = 7
+          AND count(c.oid) = {len(TENANT_TABLES)}
           AND bool_and(c.relrowsecurity AND c.relforcerowsecurity
                        AND c.relowner <> r.oid)
         FROM pg_roles r
         LEFT JOIN pg_class c ON c.relnamespace = 'public'::regnamespace
-          AND c.relname IN (
-            'tenants', 'api_keys', 'knowledge_bases', 'documents',
-            'document_versions', 'chunks', 'ingestion_jobs'
-          )
+          AND c.relname IN ({names})
         WHERE r.rolname = current_user
         GROUP BY r.rolsuper, r.rolbypassrls
     """)
