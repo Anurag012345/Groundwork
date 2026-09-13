@@ -195,10 +195,14 @@ Not exercised: HTML parsing and rate limiting under real load.
 **Caddy** is a fifth Compose service. One `DOMAIN` variable in `.env`: a real
 hostname gets a Let's Encrypt certificate, `localhost` gets Caddy's internal
 CA. `infra/Caddyfile` proxies only `/widget.js`, `/public/*`, `/health`, and
-`/ready` to the API and everything else to the dashboard; `/v1/*` and `/docs`
-are not reachable from outside because the dashboard already talks to the API
-server-side. Verified over `https://localhost`: health, widget, dashboard,
-public chat with an allowlisted origin, HTTP→HTTPS 308, and 404 for `/v1/me`.
+`/ready` to the API and everything else to the dashboard. `/v1/*` and `/docs`
+are therefore unreachable from outside, but note *why*: the catch-all sends
+them to Next, which has no such routes and answers 404 (an HTML page, not an
+API response). The proxy has no deny rule. If the dashboard ever grows a
+top-level `/v1` or `/docs` route, that changes. Verified over
+`https://localhost`: health, widget, dashboard, public chat with an
+allowlisted origin, HTTP→HTTPS 308, and 404 for `/v1/me`. The document list,
+reindex, upload, and delete were also run through Caddy → Next proxy → API.
 
 The rate limiter now sees the visitor, not Caddy. No code change:
 `FORWARDED_ALLOW_IPS=*` on the `api` service lets uvicorn rewrite
