@@ -193,6 +193,27 @@ current version stays active until the new one finishes indexing, so a chatbot
 keeps answering during a reindex. Neither endpoint has a dashboard control yet, and
 neither has run against a database.
 
+### Complexity audit — applied 2026-09-13
+
+A whole-repo pass for over-engineering removed 81 lines net. `POST /v1/chat` and
+the `ChatModel.generate` chain behind it went: nothing called them, since the
+dashboard and the widget both stream. The chat payload builder and the pgvector
+literal were each written twice and now have one home. `ProviderError` moved into
+`base.py`; the two package `__init__` files re-exported names nothing imported and
+are empty (not deleted, so setuptools still finds the packages). The `dimensions`
+property returned a constructor-set attribute, `_connection` took a `tenant_id` it
+discarded, and `approximate_tokens` built a list all seven callers measured — all
+three are gone. Both `vercel.json` templates were deleted.
+
+It also found a real defect that was not about complexity: the dashboard's proxy
+allowlist had no entry for `v1/chatbots`, so every call the chatbot screen made
+returned 404 without reaching the API, and the document routes were missing too.
+Fixed, with a comment on the allowlist saying that a missing entry fails silently.
+
+Nothing here is covered by a test. The allowlist has no test because the repo has
+no JavaScript test runner and adding one for this would cost more than it saves —
+the comment is the mitigation, which is weaker and worth knowing.
+
 ### Deliberately left out
 
 - **Branding and theming.** Colours are fixed in `widget.js`.
