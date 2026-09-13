@@ -101,12 +101,9 @@ Docker Compose is the installer.
    about on-prem touches this.
 2. **Compose must work from a clean checkout on Linux.** It is now the installer
    and it has never been verified. Known defects below.
-3. **TLS and reverse proxy.** Nothing in `compose.yaml` terminates TLS and every
-   port binds `127.0.0.1`. A widget on the client's HTTPS site cannot call an
-   HTTP API.
-4. **A handover-quality upgrade and backup procedure.** You will not have shell
-   access to their server. Migrations, restore, and diagnosing a failure all have
-   to be something the client can run or that you can walk them through.
+3. **TLS and reverse proxy.** Done 2026-09-13; see below.
+4. **A handover-quality upgrade and backup procedure.** Done 2026-09-13:
+   `RUNBOOK.md`, with the restore sequence run before it was written down.
 5. **Hardware sizing.** Does the client run Ollama on their own GPU, or bring an
    OpenAI-compatible API key? Both are already supported in code — a genuine
    strength of the provider abstraction — but the requirement has to be settled
@@ -191,8 +188,44 @@ n times holds n copies. Marked with a `ponytail:` comment at the finalize step
 in `processor.py`; a reaper is a feature for when a client reindexes enough to
 notice.
 
-Not exercised: HTML parsing, rate limiting under real load, and anything over
-TLS.
+Not exercised: HTML parsing and rate limiting under real load.
+
+### TLS, runbook, dashboard controls — 2026-09-13
+
+**Caddy** is a fifth Compose service. One `DOMAIN` variable in `.env`: a real
+hostname gets a Let's Encrypt certificate, `localhost` gets Caddy's internal
+CA. `infra/Caddyfile` proxies only `/widget.js`, `/public/*`, `/health`, and
+`/ready` to the API and everything else to the dashboard; `/v1/*` and `/docs`
+are not reachable from outside because the dashboard already talks to the API
+server-side. Verified over `https://localhost`: health, widget, dashboard,
+public chat with an allowlisted origin, HTTP→HTTPS 308, and 404 for `/v1/me`.
+
+The rate limiter now sees the visitor, not Caddy. No code change:
+`FORWARDED_ALLOW_IPS=*` on the `api` service lets uvicorn rewrite
+`request.client` from `X-Forwarded-For`, and the API log showed the gateway
+address rather than Caddy's container address. `*` is acceptable because only
+Caddy and the server's own loopback can reach port 8000. The `ponytail:`
+comment on `client_address` is now historical and was left in place as the
+explanation of why the function is still one line.
+
+**`RUNBOOK.md`** covers install, verification, upgrade, backup and restore,
+password and key changes, a symptom table, and uninstall. The backup → damage →
+restore sequence was run against the stack first: hand-deleted rows came back,
+all eight tables kept forced RLS and their policies, the chatbot answered from
+the restored data. One finding from that: the `api` container runs as root, so
+`./data` is root-owned on the host and the runbook uses `sudo` for the tar and
+rm. A non-root container would be cleaner but needs a `chown` at install, which
+is a worse footgun than `sudo` in a runbook.
+
+**Dashboard document controls.** Each knowledge-base card now lists its
+documents with status and version, and has Reindex and Delete. Both were
+exercised through the running dashboard: reindex went 202 → processed →
+`indexed · v2`; delete returned 204 and the list refreshed.
+
+**`IMPLEMENTATION_ROADMAP.md`** was replaced with a one-page reconciliation:
+the requirements that still hold with their real status, what was dropped and
+why, and what was built that the original plan did not foresee. The 26 KB
+original is in git history.
 
 ### Widget — built and exercised 2026-09-13
 
@@ -290,20 +323,19 @@ question per client before quoting the work.
 
 ## Next actions, in order
 
-Done since the previous list: the Linux run (item 2), the integration test
-(item 7), the `APP_ENV` gate (item 6), and PDF/DOCX/reindex/delete through the
-running stack, all on 2026-09-13.
+Everything on the previous list except the remote is done as of 2026-09-13.
 
-1. **Push to a remote.** There is still exactly one copy of this repository, on
-   one disk. Five minutes, and it stops a disk failure from being total loss.
-2. **Settle TLS and reverse proxy** as part of the compose story. A widget on the
-   client's HTTPS site cannot call an HTTP API, and every port binds
-   `127.0.0.1`. Reading a trusted forwarded-for header for the rate limiter
-   belongs to the same change.
-3. **Write the install, upgrade, and backup runbook.** You will not have access
-   to the client's server. The WSL notes above are the first draft of the
-   "what goes wrong" section.
-4. **Add document list, delete, and reindex controls to the dashboard.** The
-   endpoints exist and now have run; the dashboard has upload only.
-5. **Reconcile `IMPLEMENTATION_ROADMAP.md`** with the code; it still assumes the
-   Vercel hosted model. The README is now current.
+1. **Push to a remote.** Still exactly one copy of this repository, on one
+   disk, now with a day's more work in it. Needs a repository to push to.
+2. **Run the stack on a real Linux server, not WSL.** Docker Engine under WSL2
+   is close but not identical: real Ollama on `host.docker.internal`, real DNS
+   and Let's Encrypt for `DOMAIN`, a real firewall. Follow `RUNBOOK.md` §2–3
+   literally and fix whatever it gets wrong.
+3. **Upload an HTML document.** The one parser that has not run for real.
+4. **Wire the integration test into something automatic** — a `make test` or a
+   Compose profile that runs it against `db` — so it stops being a thing
+   someone has to remember after a migration.
+5. **Non-root `api` container**, if a client's security review asks. Needs the
+   `chown` step in the runbook.
+6. **Reclaim superseded chunks** once a client reindexes enough to notice;
+   marked in `processor.py`.
