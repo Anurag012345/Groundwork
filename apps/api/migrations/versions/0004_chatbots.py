@@ -20,7 +20,6 @@ def upgrade():
             name varchar(120) NOT NULL,
             greeting text NOT NULL DEFAULT '',
             allowed_origins text[] NOT NULL DEFAULT '{}',
-            is_active boolean NOT NULL DEFAULT true,
             created_at timestamptz NOT NULL DEFAULT now(),
             FOREIGN KEY (tenant_id, knowledge_base_id)
                 REFERENCES knowledge_bases(tenant_id, id) ON DELETE CASCADE

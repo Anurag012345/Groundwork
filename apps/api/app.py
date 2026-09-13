@@ -539,7 +539,7 @@ def chatbots(session: SessionDependency):
     rows = session.connection.execute(
         text("""
             SELECT id, public_key, name, greeting, allowed_origins, knowledge_base_id,
-                   is_active, created_at
+                   created_at
             FROM chatbots ORDER BY created_at DESC
         """)
     ).mappings()

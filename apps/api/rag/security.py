@@ -96,14 +96,13 @@ def widget_session(public_key: str, origin: Annotated[str | None, Header()] = No
             connection.execute(
                 text("""
                     SELECT id, knowledge_base_id, name, greeting, allowed_origins
-                    FROM chatbots WHERE public_key=:key AND is_active
+                    FROM chatbots WHERE public_key=:key
                 """),
                 {"key": public_key},
             )
             .mappings()
             .one_or_none()
         )
-        # Same response for unknown and disabled: do not disclose which.
         if chatbot is None:
             raise HTTPException(404, "Chatbot not found")
         if not origin_allowed(origin, chatbot["allowed_origins"]):
