@@ -305,8 +305,6 @@ async def upload_document(
     session: SessionDependency,
     file: Annotated[UploadFile, File()],
 ):
-    if settings().app_env not in {"development", "test"}:
-        raise HTTPException(501, "Production uploads require the private Blob upload flow")
     filename = safe_filename(file.filename)
     try:
         source_type = document_kind(filename)
@@ -533,8 +531,6 @@ def ingestion_job(job_id: UUID, session: SessionDependency):
 
 @app.post("/v1/ingestion-jobs/{job_id}/process")
 async def process_job(job_id: UUID, session: SessionDependency):
-    if settings().app_env not in {"development", "test"}:
-        raise HTTPException(404, "Not found")
     try:
         result = await process_ingestion_job(
             session.tenant_id, job_id, settings(), object_storage()

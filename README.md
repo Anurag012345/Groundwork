@@ -28,8 +28,7 @@ User login, conversation history, chatbot branding, and durable queue delivery a
 **not implemented**. Uploading a document only queues an ingestion job; the dashboard
 then calls `POST /v1/ingestion-jobs/{id}/process`, which runs the whole job inside
 that request and needs the embedding model reachable, so a large file blocks the
-dashboard until it finishes. Both endpoints are available only when `APP_ENV` is
-`development` or `test`, which Compose sets.
+dashboard until it finishes.
 
 The stack was first run end to end on 2026-09-13 (Docker on Linux, LM Studio as the
 model provider): migrations, the runtime role guard, the isolation test, upload →

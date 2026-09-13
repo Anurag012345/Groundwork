@@ -28,7 +28,6 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg://rag_app:${APP_DB_PASSWORD:-local-runtime-only}@db:5432/rag
-      APP_ENV: development
       CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3000"]}'
       CHAT_PROVIDER: ${CHAT_PROVIDER:-ollama}
       CHAT_BASE_URL: ${CHAT_BASE_URL:-http://host.docker.internal:11434}
