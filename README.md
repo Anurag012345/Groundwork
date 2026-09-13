@@ -25,13 +25,16 @@ PostgreSQL with pgvector.
 - Docker Compose services for PostgreSQL, migrations, the API, and the dashboard.
 
 User login, conversation history, chatbot branding, and durable queue delivery are
-**not implemented**. Uploading a document invokes the ingestion processor inline and
-requires the configured embedding model to be reachable, so a large file blocks the
-request that uploaded it.
+**not implemented**. Uploading a document only queues an ingestion job; the dashboard
+then calls `POST /v1/ingestion-jobs/{id}/process`, which runs the whole job inside
+that request and needs the embedding model reachable, so a large file blocks the
+dashboard until it finishes. Both endpoints are available only when `APP_ENV` is
+`development` or `test`, which Compose sets.
 
-**Nothing in this repository has been run against a live database.** The test suite
-passes, but the migrations, the runtime role guard, and the widget have never been
-exercised. See [STATUS.md](STATUS.md).
+The stack was first run end to end on 2026-09-13 (Docker on Linux, LM Studio as the
+model provider): migrations, the runtime role guard, the isolation test, upload →
+chat, and the widget in a browser. See [STATUS.md](STATUS.md) for what was verified
+and what was not.
 
 ## Quick start with Docker Desktop
 
