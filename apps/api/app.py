@@ -54,9 +54,12 @@ async def public_cors(request, call_next):
             } | {"Access-Control-Allow-Origin": origin, "Vary": "Origin"},
         )
     response = await call_next(request)
-    if response.status_code < 400:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Vary"] = "Origin"
+    # Errors carry the header too, otherwise the browser blocks the widget from
+    # reading them and a rate limit or a misconfigured origin both surface as a
+    # generic failure the client cannot diagnose. These messages say nothing a
+    # visitor could not already infer.
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Vary"] = "Origin"
     return response
 
 

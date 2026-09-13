@@ -142,3 +142,14 @@ def test_widget_bundle_is_served_and_cacheable():
     assert response.headers["content-type"].startswith("text/javascript")
     assert response.headers["cache-control"] == "public, max-age=300"
     assert "attachShadow" in response.text
+
+
+def test_public_errors_are_readable_by_the_embedding_page():
+    # Without this the widget cannot show why it failed: the browser blocks the
+    # response body, and a rate limit looks identical to a broken install.
+    client = TestClient(api.app)
+    response = client.get(
+        "/public/v1/chatbots/not-a-key", headers={"Origin": "https://client.com"}
+    )
+    assert response.status_code == 401
+    assert response.headers["access-control-allow-origin"] == "https://client.com"
