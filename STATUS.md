@@ -8,14 +8,14 @@ trust this file: both of those have drifted from the code.
 
 | Check | Result |
 |---|---|
-| `pytest -q` (apps/api) | 36 passed, **1 skipped** |
+| `pytest -q` (apps/api) | 62 passed, 1 skipped (the integration test, without a database) |
 | `ruff check .` | clean |
 | `npm run typecheck` | clean |
 | `npm run build` | clean, 3 routes |
-| `pytest -m integration` (tenant isolation) | **never run — cannot run on this machine** |
+| `pytest -m integration` (tenant isolation) | **1 passed** against live PostgreSQL, 2026-09-13 |
+| `docker compose up --build` on Linux | **runs**, all services healthy, 2026-09-13 |
 
-~1,800 lines across a FastAPI backend and a Next.js dashboard. The code is
-tidy and the automated checks are green.
+The code is tidy and the automated checks are green.
 
 ## Version control
 
@@ -24,23 +24,17 @@ Before that the whole project was one unversioned copy on one disk. There is
 still no remote, so it remains a single copy — just a versioned one. Branch is
 `master`; Duoforge uses `main`.
 
-## The isolation claim is unverified
+## The isolation claim — verified 2026-09-13
 
-Multi-tenant isolation is this project's central claim, and it is the one thing
-the test suite does not prove. `tests/test_isolation.py` is the skip in
-`36 passed, 1 skipped` — it needs `TEST_DATABASE_URL` and
-`TEST_ADMIN_DATABASE_URL` against a live PostgreSQL with migrations applied.
+`tests/test_isolation.py` passed against the Compose database: cross-tenant
+reads, deletes, inserts, and missing-context denial all behave. Checked directly
+in `pg_class` as well: all eight tenant tables have `relrowsecurity` and
+`relforcerowsecurity` set, each carries a `tenant_isolation` policy, and
+`rag_app` is neither superuser nor `BYPASSRLS`. `/ready` returns 200, which is
+`assert_runtime_role` passing at eight tables.
 
-On this machine: Docker is not installed, nothing listens on 5432, and nothing
-listens on 11434 (Ollama). So the documented quick start has not been executed
-here, and neither has an end-to-end upload → ingest → chat run.
-
-The RLS code itself looks right — `0001_tenants.py:46-48` and
-`0002_ingestion.py:114-116` both `ENABLE` + `FORCE` row-level security and
-create a `tenant_isolation` policy with `USING` and `WITH CHECK`, and
-`rag/security.py` guards against running as an RLS-bypassing role. But as the
-README says itself: passing unit tests does not establish database isolation.
-Until that integration run goes green, treat isolation as designed, not proven.
+It was run inside the `api` image with the two `TEST_*` URLs pointed at the `db`
+service. It is not wired into anything automatic; rerun it after any migration.
 
 ## Documentation drift (both directions)
 
@@ -57,19 +51,27 @@ Claimed unimplemented in the README but present:
   the SSE frames.
 
 Confirmed genuinely absent (grepped, not assumed): QStash, Vercel Blob, Redis,
-`conversations`/`messages` tables, and any widget code. `app.py:252` returns a
-deliberate 501 for production uploads.
+and `conversations`/`messages` tables. The widget has since been built and the
+501 upload gate removed; see below.
 
-## What works end to end (by design, unrun)
+## What works end to end
 
 API-key auth → create knowledge base → upload PDF/DOCX/TXT/MD/HTML → parse →
 chunk → embed in batches → atomic version activation → hybrid vector + full-text
 retrieval with reciprocal-rank fusion → grounded streamed answer with citations
 and an insufficient-evidence fallback.
 
-That is a complete, correct RAG loop. The retrieval design is better than most
-tutorial projects: per-KB pinned embedding space, RRF hybrid search, a relevance
-floor, and retrieved text treated as untrusted data.
+That is a complete, correct RAG loop, and on 2026-09-13 it ran: a five-section
+Markdown handbook became 4 chunks, and questions about leave, expenses, and office
+hours came back correct with the right `[n]` citation, through the raw API, the
+dashboard playground, and the widget. An off-topic question was refused.
+
+The retrieval design is better than most tutorial projects: per-KB pinned
+embedding space, RRF hybrid search, a relevance floor, and retrieved text treated
+as untrusted data. One observation from the run: the relevance floor let all four
+chunks through for "What is the capital of Mongolia?", so the refusal came from
+the model's instructions rather than the empty-context fallback. Fine for a
+four-chunk corpus; worth revisiting the floor once a real corpus exists.
 
 ## Delivery model: installed on each client's own server
 
@@ -126,16 +128,58 @@ Docker Compose is the installer.
   `${CORS_ORIGINS:-["http://localhost:3000"]}`, settable from the root `.env`
   where `.env.example` already documents the JSON-list format.
 
-Verified by structure check only. **None of this has been run.** The real
-validation is `docker compose config` followed by `docker compose up --build`
-on Linux, and that remains the next action.
+All four held up when the stack was run (next section). The `APP_ENV` gate that
+was still outstanding is gone: it guarded a Vercel-only concern, `LocalStorage`
+is the only backend on a client's server, and the knob had no other reader.
 
-Still outstanding from the original list: `APP_ENV` gates the wrong axis.
-`app.py:251` and `app.py:368` return 501 outside development, and compose pins
-`development` so uploads work as shipped. The gate should key off the storage
-backend, not the environment name. About an hour, not a blocker.
+### First Linux run — 2026-09-13
 
-### Widget — built 2026-09-13, not yet exercised
+Docker Engine 29 on Ubuntu 26.04 under WSL2, from a fresh `git clone` into the
+Linux filesystem. LM Studio on the Windows host as the model provider
+(`google/gemma-4-e4b` for chat, `text-embedding-nomic-embed-text-v1.5` at 768
+dimensions), reached through the `openai_compatible` provider with no code change.
+
+What ran, in order: `docker compose config` clean; `up --build` brought `db`,
+`migrate` (exit 0, `alembic_version` = 0004), `api` (healthy), and `web` up;
+`rag.bootstrap` printed a tenant and key; the isolation test passed; create
+knowledge base → upload → `/process` → 4 chunks → streamed grounded answers with
+citations; chatbot created, public endpoint answered with the allowlisted
+`Origin` and returned 403 with a wrong or missing one; preflight correct;
+`widget.js` loaded into `examples/host-page.html` in a browser, rendered
+unaffected by the host page's hostile CSS, streamed an answer with citations
+through the shadow root. The dashboard connected, listed, asked the playground,
+and showed the chatbot with its snippet.
+
+Found and fixed:
+
+- **Chatbot and knowledge-base cards overflowed the viewport below 1100px.** The
+  narrow-layout grid column was `1fr`, and `.bases` had an `auto` column, so the
+  embed snippet's min-content width won twice. `minmax(0,1fr)` and
+  `min-width:0` on the card.
+- **`test_default_factory_uses_ollama` read the real environment.** It failed
+  inside a container configured for LM Studio. It now clears the provider
+  variables first, so the suite runs anywhere.
+- **The README described upload as inline.** It queues; the dashboard calls
+  `/process`. Corrected.
+
+Not defects, but worth knowing:
+
+- **WSL halts the VM about eight seconds after the last `wsl` session exits.**
+  Docker, and everything in it, restarts on the next command. It looked like the
+  API crashing until `journalctl` showed dockerd booting fresh. Keep a session
+  open or set `vmIdleTimeout` in `.wslconfig`. Irrelevant on a real server.
+- **From Docker on WSL2, `host.docker.internal` is the WSL VM, not Windows.**
+  LM Studio had to be bound to `0.0.0.0` and addressed by the eth0 gateway IP.
+  The `extra_hosts` entry is still right for a real Linux server. Noted in
+  `.env.example`.
+- **OpenAI-compatible providers need `/v1` on the base URL and a non-empty key.**
+  Also noted in `.env.example`.
+
+Not exercised: PDF, DOCX, and HTML parsing (only Markdown was uploaded), the
+document delete and reindex endpoints, rate limiting under real load, and
+anything over TLS.
+
+### Widget — built and exercised 2026-09-13
 
 Migration `0004` adds `chatbots` (tenant, knowledge base, public key, greeting,
 origin allowlist) with the same ENABLE + FORCE + policy treatment as the earlier
@@ -171,14 +215,10 @@ Decisions worth knowing:
   `TENANT_TABLES`, so adding a ninth table cannot silently 503 the whole API the
   way adding the eighth would have.
 
-**What has not been verified.** The 22 new tests cover the origin allowlist, key
-separation, preflight ordering, rate limiting, and the knowledge-base discipline.
-They do not cover: that migration 0004 applies, that the runtime guard still passes
-at eight tables against live PostgreSQL, that SSE reaches a browser through the
-shadow root, or that the widget renders correctly anywhere. There is no Docker,
-PostgreSQL, or Ollama on this machine, and a `file://` harness cannot be driven by
-the browser tooling. **Nobody has seen this widget run.** Treat it as written and
-type-checked, not as working.
+The 22 tests cover the origin allowlist, key separation, preflight ordering, rate
+limiting, and the knowledge-base discipline. The Linux run covered the rest:
+migration 0004 applies, the runtime guard passes at eight tables, and the widget
+renders and streams in a real browser from a page with hostile CSS.
 
 The dashboard can now create, list, copy the snippet for, and delete chatbots.
 It asks the operator for the API's public address, because the dashboard reaches
@@ -191,7 +231,7 @@ row, its versions, chunks, and jobs through the cascade, then the stored file;
 queues it, refusing while another job for that document is queued or running. The
 current version stays active until the new one finishes indexing, so a chatbot
 keeps answering during a reindex. Neither endpoint has a dashboard control yet, and
-neither has run against a database.
+neither was called during the Linux run.
 
 ### Complexity audit — applied 2026-09-13
 
@@ -235,27 +275,22 @@ question per client before quoting the work.
 
 ## Next actions, in order
 
-Items 1 and 3 of the earlier list are done — the installer defects were fixed and
-the widget was built on 2026-09-13, both as described above. What remains:
+Done since the previous list: the Linux run (item 2), the integration test
+(item 7), and the `APP_ENV` gate (item 6), all on 2026-09-13.
 
 1. **Push to a remote.** There is still exactly one copy of this repository, on
    one disk. Five minutes, and it stops a disk failure from being total loss.
-2. **Install Docker and run the stack from a clean checkout on Linux.** This is
-   the installer; it has never been executed, and neither have migration 0004,
-   the runtime guard at eight tables, or the widget. Expect to find more defects
-   than the four already fixed.
-3. **Settle TLS and reverse proxy** as part of the compose story. A widget on the
+2. **Settle TLS and reverse proxy** as part of the compose story. A widget on the
    client's HTTPS site cannot call an HTTP API, and every port binds
    `127.0.0.1`. Reading a trusted forwarded-for header for the rate limiter
    belongs to the same change.
-4. **Write the install, upgrade, and backup runbook.** You will not have access
-   to the client's server.
-5. **Add document list, delete, and reindex controls to the dashboard.** The
-   endpoints exist; the dashboard has upload only.
-6. **Fix the `APP_ENV` gate.** `app.py` returns 501 outside development for
-   uploads; the gate should key off the storage backend, not the environment
-   name. About an hour.
-7. **Run `pytest -m integration -q`** — priority depends entirely on whether any
-   client needs multiple tenants in one install.
-8. **Reconcile `README.md` and `IMPLEMENTATION_ROADMAP.md`** with the code; both
-   still assume the Vercel hosted model.
+3. **Write the install, upgrade, and backup runbook.** You will not have access
+   to the client's server. The WSL notes above are the first draft of the
+   "what goes wrong" section.
+4. **Add document list, delete, and reindex controls to the dashboard.** The
+   endpoints exist; the dashboard has upload only. Exercise delete and reindex
+   against the database while doing it — they have not run.
+5. **Upload a PDF and a DOCX** through the running stack. Only Markdown has
+   been through the parsers for real.
+6. **Reconcile `IMPLEMENTATION_ROADMAP.md`** with the code; it still assumes the
+   Vercel hosted model. The README is now current.
