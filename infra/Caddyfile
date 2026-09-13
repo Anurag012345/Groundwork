@@ -1,0 +1,22 @@
+# One hostname for everything. A real DOMAIN gets a Let's Encrypt certificate
+# automatically (ports 80 and 443 must reach this server); "localhost" gets
+# Caddy's own internal CA, which browsers warn about but curl -k accepts.
+{$DOMAIN} {
+	# What a visitor's browser fetches from the client's website. The dashboard
+	# reaches the API through its own server-side proxy, so nothing else is exposed.
+	handle /widget.js {
+		reverse_proxy api:8000
+	}
+	handle /public/* {
+		reverse_proxy api:8000
+	}
+	handle /health {
+		reverse_proxy api:8000
+	}
+	handle /ready {
+		reverse_proxy api:8000
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+}

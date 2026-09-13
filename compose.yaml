@@ -38,6 +38,9 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-768}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      # Trust X-Forwarded-For so the rate limiter sees the visitor, not caddy.
+      # Only caddy and this server's own loopback can reach this port.
+      FORWARDED_ALLOW_IPS: "*"
     ports: ["127.0.0.1:8000:8000"]
     extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
@@ -59,5 +62,16 @@ services:
     ports: ["127.0.0.1:3000:3000"]
     depends_on:
       api: {condition: service_healthy}
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [web]
 volumes:
   postgres_data:
+  caddy_data:
