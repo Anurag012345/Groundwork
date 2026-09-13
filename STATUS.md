@@ -235,20 +235,27 @@ question per client before quoting the work.
 
 ## Next actions, in order
 
-1. **Fix the four installer defects** — `extra_hosts` for Linux, restart
-   policies, drop the dead `redis`/`qstash` services, make `CORS_ORIGINS`
-   configurable. Under a day, and it unblocks every install.
+Items 1 and 3 of the earlier list are done — the installer defects were fixed and
+the widget was built on 2026-09-13, both as described above. What remains:
+
+1. **Push to a remote.** There is still exactly one copy of this repository, on
+   one disk. Five minutes, and it stops a disk failure from being total loss.
 2. **Install Docker and run the stack from a clean checkout on Linux.** This is
-   the installer; it has never been executed. Expect to find more than the four
-   defects above.
-3. **Build the widget.** Largest gap between here and anything sellable, and
-   building it will surface the CORS, TLS, and token-exchange decisions rather
-   than leaving them theoretical.
-4. **Settle TLS and reverse proxy** as part of the compose story, since the
-   widget needs HTTPS.
-5. **Write the install, upgrade, and backup runbook.** You will not have access
+   the installer; it has never been executed, and neither have migration 0004,
+   the runtime guard at eight tables, or the widget. Expect to find more defects
+   than the four already fixed.
+3. **Settle TLS and reverse proxy** as part of the compose story. A widget on the
+   client's HTTPS site cannot call an HTTP API, and every port binds
+   `127.0.0.1`. Reading a trusted forwarded-for header for the rate limiter
+   belongs to the same change.
+4. **Write the install, upgrade, and backup runbook.** You will not have access
    to the client's server.
-6. **Run `pytest -m integration -q`** — priority depends entirely on whether any
+5. **Add document list, delete, and reindex controls to the dashboard.** The
+   endpoints exist; the dashboard has upload only.
+6. **Fix the `APP_ENV` gate.** `app.py` returns 501 outside development for
+   uploads; the gate should key off the storage backend, not the environment
+   name. About an hour.
+7. **Run `pytest -m integration -q`** — priority depends entirely on whether any
    client needs multiple tenants in one install.
-7. **Reconcile `README.md` and `IMPLEMENTATION_ROADMAP.md`** with the code; both
+8. **Reconcile `README.md` and `IMPLEMENTATION_ROADMAP.md`** with the code; both
    still assume the Vercel hosted model.
