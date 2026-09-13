@@ -96,11 +96,11 @@ Docker Compose is the installer.
 
 ### Moved onto the critical path
 
-1. **The embeddable widget.** Unchanged and still unstarted. If the product is a
-   chatbot for the client's website, the widget is the product surface. Nothing
-   about on-prem touches this.
-2. **Compose must work from a clean checkout on Linux.** It is now the installer
-   and it has never been verified. Known defects below.
+1. **The embeddable widget.** Built and exercised 2026-09-13; see below. If
+   the product is a chatbot for the client's website, this is the product
+   surface.
+2. **Compose must work from a clean checkout on Linux.** It is the installer.
+   Verified 2026-09-13 under WSL2; a real server run is still on the list.
 3. **TLS and reverse proxy.** Done 2026-09-13; see below.
 4. **A handover-quality upgrade and backup procedure.** Done 2026-09-13:
    `RUNBOOK.md`, with the restore sequence run before it was written down.
