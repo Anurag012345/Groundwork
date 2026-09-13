@@ -1,0 +1,72 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: rag
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-admin-only}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-local-runtime-only}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/init-db.sh:/docker-entrypoint-initdb.d/10-runtime-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  qstash:
+    image: public.ecr.aws/upstash/qstash:latest
+    command: ["qstash", "dev"]
+    ports: ["127.0.0.1:8080:8080"]
+  migrate:
+    build: ./apps/api
+    environment:
+      MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-local-admin-only}@db:5432/rag
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db: {condition: service_healthy}
+  api:
+    build: ./apps/api
+    environment:
+      DATABASE_URL: postgresql+psycopg://rag_app:${APP_DB_PASSWORD:-local-runtime-only}@db:5432/rag
+      APP_ENV: development
+      CORS_ORIGINS: '["http://localhost:3000"]'
+      CHAT_PROVIDER: ${CHAT_PROVIDER:-ollama}
+      CHAT_BASE_URL: ${CHAT_BASE_URL:-http://host.docker.internal:11434}
+      CHAT_MODEL: ${CHAT_MODEL:-llama3.2}
+      CHAT_API_KEY: ${CHAT_API_KEY:-}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-ollama}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://host.docker.internal:11434}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-768}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+    ports: ["127.0.0.1:8000:8000"]
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      API_BASE_URL: http://api:8000
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on:
+      api: {condition: service_healthy}
+volumes:
+  postgres_data:
