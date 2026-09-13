@@ -185,9 +185,22 @@ It asks the operator for the API's public address, because the dashboard reaches
 the API through a server-side proxy and so cannot discover where a visitor's
 browser should load the widget from.
 
+Documents can be deleted and reindexed: `DELETE /v1/documents/{id}` removes the
+row, its versions, chunks, and jobs through the cascade, then the stored file;
+`POST /v1/documents/{id}/reindex` opens a new version off the same stored file and
+queues it, refusing while another job for that document is queued or running. The
+current version stays active until the new one finishes indexing, so a chatbot
+keeps answering during a reindex. Neither endpoint has a dashboard control yet, and
+neither has run against a database.
+
 ### Deliberately left out
 
 - **Branding and theming.** Colours are fixed in `widget.js`.
+- **Document list and controls in the dashboard.** `GET /v1/knowledge-bases/{id}/documents`
+  exists and the delete and reindex endpoints exist, but the dashboard has upload
+  only — no list, no delete or reindex buttons.
+- **`GET /v1/documents/{id}`.** The per-knowledge-base list already returns the
+  same rows.
 - **Conversation history.** Each question is independent; there is no follow-up
   context and nothing is stored.
 

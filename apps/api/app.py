@@ -401,6 +401,117 @@ async def upload_document(
     }
 
 
+@app.delete("/v1/documents/{document_id}", status_code=204)
+def delete_document(document_id: UUID, session: SessionDependency):
+    keys = session.connection.execute(
+        text("SELECT DISTINCT storage_key FROM document_versions WHERE document_id=:id"),
+        {"id": document_id},
+    ).scalars().all()
+    deleted = session.connection.execute(
+        text("DELETE FROM documents WHERE id=:id RETURNING id"), {"id": document_id}
+    ).scalar_one_or_none()
+    if deleted is None:
+        raise HTTPException(404, "Document not found")
+    # Versions, chunks, and jobs go with it through the cascade. Stored files are
+    # removed after the row, so a failure here leaves an unreferenced file rather
+    # than a document whose source has vanished.
+    # ponytail: if the process dies between the commit and these unlinks the file
+    # is orphaned. Sweep storage against document_versions if that ever matters.
+    for key in keys:
+        object_storage().delete(key)
+    return Response(status_code=204)
+
+
+@app.post("/v1/documents/{document_id}/reindex", status_code=202)
+def reindex_document(document_id: UUID, session: SessionDependency):
+    latest = (
+        session.connection.execute(
+            text("""
+                SELECT v.id, v.version, v.storage_key, v.content_type, v.byte_size,
+                       v.checksum_sha256, k.embedding_provider, k.embedding_model,
+                       k.embedding_dimensions
+                FROM document_versions v
+                JOIN documents d ON d.id = v.document_id
+                JOIN knowledge_bases k ON k.id = d.knowledge_base_id
+                WHERE v.document_id = :id
+                ORDER BY v.version DESC
+                LIMIT 1
+            """),
+            {"id": document_id},
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if latest is None:
+        raise HTTPException(404, "Document not found")
+    busy = session.connection.execute(
+        text("""
+            SELECT 1 FROM ingestion_jobs j
+            JOIN document_versions v ON v.id = j.document_version_id
+            WHERE v.document_id = :id AND j.status IN ('queued', 'running')
+        """),
+        {"id": document_id},
+    ).scalar()
+    if busy:
+        raise HTTPException(409, "This document is already being indexed")
+    try:
+        object_storage().read(latest["storage_key"])
+    except (OSError, ValueError):
+        raise HTTPException(
+            409, "The original file for this document is no longer stored. Upload it again."
+        ) from None
+
+    # A new version off the same stored file. The current version stays active until
+    # the new one finishes indexing, so the chatbot keeps answering throughout.
+    version_id, job_id = uuid4(), uuid4()
+    session.connection.execute(
+        text("""
+            INSERT INTO document_versions(
+                id, tenant_id, document_id, version, status, storage_key,
+                content_type, byte_size, checksum_sha256,
+                embedding_provider, embedding_model, embedding_dimensions
+            ) VALUES (
+                :id, :tenant_id, :document_id, :version, 'queued', :storage_key,
+                :content_type, :byte_size, :checksum,
+                :embedding_provider, :embedding_model, :embedding_dimensions
+            )
+        """),
+        {
+            "id": version_id,
+            "tenant_id": session.tenant_id,
+            "document_id": document_id,
+            "version": latest["version"] + 1,
+            "storage_key": latest["storage_key"],
+            "content_type": latest["content_type"],
+            "byte_size": latest["byte_size"],
+            "checksum": latest["checksum_sha256"],
+            "embedding_provider": latest["embedding_provider"],
+            "embedding_model": latest["embedding_model"],
+            "embedding_dimensions": latest["embedding_dimensions"],
+        },
+    )
+    session.connection.execute(
+        text("""
+            INSERT INTO ingestion_jobs(
+                id, tenant_id, document_version_id, stage, status, idempotency_key
+            ) VALUES (:id, :tenant_id, :version_id, 'parse', 'queued', :key)
+        """),
+        {
+            "id": job_id,
+            "tenant_id": session.tenant_id,
+            "version_id": version_id,
+            "key": f"{version_id}:parse",
+        },
+    )
+    return {
+        "id": document_id,
+        "version_id": version_id,
+        "job_id": job_id,
+        "version": latest["version"] + 1,
+        "status": "queued",
+    }
+
+
 @app.get("/v1/ingestion-jobs/{job_id}")
 def ingestion_job(job_id: UUID, session: SessionDependency):
     row = (

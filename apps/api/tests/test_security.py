@@ -43,3 +43,19 @@ def test_schema_rejects_client_tenant_override():
 
 def test_safe_filename_removes_path_and_unsafe_characters():
     assert safe_filename("../folder/report?.md") == "report_.md"
+
+
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("delete", "/v1/documents/{id}"),
+        ("post", "/v1/documents/{id}/reindex"),
+        ("delete", "/v1/chatbots/{id}"),
+    ],
+)
+def test_document_and_chatbot_routes_require_credentials(method, path):
+    # These destroy or re-run work, so an unauthenticated call must never reach
+    # the database to find out whether the id exists.
+    client = TestClient(app)
+    response = getattr(client, method)(path.format(id=uuid4()))
+    assert response.status_code == 401
