@@ -607,7 +607,8 @@ def create_chatbot(data: ChatbotInput, session: SessionDependency):
                         (id, tenant_id, knowledge_base_id, public_key, name, greeting,
                          allowed_origins)
                     VALUES (:id, :tenant, :kb, :key, :name, :greeting, :origins)
-                    RETURNING id, public_key, name, greeting, allowed_origins, created_at
+                    RETURNING id, public_key, name, greeting, allowed_origins,
+                              knowledge_base_id, created_at
                 """),
                 {
                     "id": chatbot_id,
