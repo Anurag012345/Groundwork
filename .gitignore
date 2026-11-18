@@ -13,3 +13,7 @@ data/
 coverage/
 *.tsbuildinfo
 *.egg-info/
+
+# eval corpus PDFs are re-fetched by evals/fetch_corpus.py
+evals/corpus/
+evals/text/
