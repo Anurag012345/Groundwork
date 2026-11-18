@@ -17,3 +17,6 @@ coverage/
 # eval corpus PDFs are re-fetched by evals/fetch_corpus.py
 evals/corpus/
 evals/text/
+evals/.eval_key
+evals/results/
+evals/.eval_kb

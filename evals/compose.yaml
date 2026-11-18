@@ -1,0 +1,49 @@
+# Throwaway eval stack, separate from the root compose.yaml (own volume, API on 8010).
+# Run from WSL:  WSL_GATEWAY=<ip> docker compose -p rag-eval -f evals/compose.yaml up -d --build
+# Ollama listens on Windows loopback only, so containers reach it via evals/wsl_relay.py.
+name: rag-eval
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: rag
+      POSTGRES_PASSWORD: eval-admin
+      APP_DB_PASSWORD: eval-runtime
+    volumes:
+      - eval_pg:/var/lib/postgresql/data
+      - ../infra/init-db.sh:/docker-entrypoint-initdb.d/10-runtime-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  migrate:
+    build: ../apps/api
+    environment:
+      MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:eval-admin@db:5432/rag
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db: {condition: service_healthy}
+  api:
+    build: ../apps/api
+    environment:
+      DATABASE_URL: postgresql+psycopg://rag_app:eval-runtime@db:5432/rag
+      MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:eval-admin@db:5432/rag
+      CHAT_PROVIDER: ollama
+      CHAT_BASE_URL: http://${WSL_GATEWAY:?set WSL_GATEWAY}:11434
+      CHAT_MODEL: ${EVAL_CHAT_MODEL:-hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q5_K_M}
+      EMBEDDING_PROVIDER: ollama
+      EMBEDDING_BASE_URL: http://${WSL_GATEWAY}:11434
+      EMBEDDING_MODEL: nomic-embed-text
+      EMBEDDING_DIMENSIONS: "768"
+      UPLOAD_MAX_BYTES: "41943040"
+    ports: ["127.0.0.1:8010:8000"]
+    volumes:
+      - eval_uploads:/app/data
+      - ./:/evals  # run_eval.py runs in here, against the same code the API serves
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+volumes:
+  eval_pg:
+  eval_uploads:
