@@ -20,3 +20,4 @@ evals/text/
 evals/.eval_key
 evals/results/
 evals/.eval_kb
+evals/.eval_kb_*

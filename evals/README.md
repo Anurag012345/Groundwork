@@ -33,6 +33,25 @@ docker compose -p rag-eval -f evals/compose.yaml exec -T api \
 
 Results land in `evals/results/<tag>.json` (git-ignored; the summary is at the top).
 
+## Ablations
+
+Add `--no-generate` to any of these for a fast retrieval-only run (about 20 s without a reranker).
+
+```bash
+run_eval.py --no-generate --mode dense|sparse|hybrid --tag <tag>   # which ranker(s) to use
+run_eval.py --no-generate --rerank BAAI/bge-reranker-base --tag <tag>   # top-20 candidates -> cross-encoder -> top-5
+```
+
+Chunk size is set when indexing, so each size is its own knowledge base: recreate the API with
+`CHUNK_MAX_TOKENS=200 CHUNK_OVERLAP_TOKENS=30 docker compose ... up -d api`, run
+`python evals/ingest.py --name c200`, then pass `--kb c200` to the runner.
+`python evals/table.py "label=tag" ...` prints the comparison as a markdown table.
+`passage_recall` favours large chunks (a quote cannot straddle a boundary it never crosses), so
+compare chunk sizes on doc hit and MRR first.
+
+The reranker needs `fastembed` and a Hugging Face model; `evals/Dockerfile` adds the package and
+the `eval_models` volume caches the model (about 1 GB for bge-reranker-base).
+
 ## What the numbers mean
 
 - `doc_hit` / `doc_recall` / `mrr`: whether the right circular is in the top-k chunks, and how high.

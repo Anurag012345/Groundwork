@@ -27,6 +27,7 @@ from rag.config import settings
 from rag.db import engine, set_tenant
 from rag.providers.base import ChatMessage
 from rag.providers.factory import chat_model, embedding_model
+from rag.rerank import CrossEncoderReranker
 from rag.retrieval import retrieve
 from rag.security import tenant_from_key
 
@@ -94,15 +95,20 @@ async def main() -> None:
     parser.add_argument("--no-generate", action="store_true", help="retrieval metrics only")
     parser.add_argument("--judge", help="judge model name; enables correctness and faithfulness")
     parser.add_argument("--tag", default="baseline")
+    parser.add_argument("--mode", choices=["hybrid", "dense", "sparse"], default="hybrid")
+    parser.add_argument("--rerank", help="fastembed cross-encoder model, e.g. BAAI/bge-reranker-base")
+    parser.add_argument("--candidates", type=int, default=20, help="chunks fetched before reranking")
+    parser.add_argument("--kb", default="", help="knowledge base variant name (see ingest.py --name)")
     args = parser.parse_args()
 
     tenant = tenant_from_key((ROOT / ".eval_key").read_text().strip())
-    kb = UUID((ROOT / ".eval_kb").read_text().strip())
+    kb = UUID((ROOT / f".eval_kb{args.kb and '_' + args.kb}").read_text().strip())
     rows = [json.loads(line) for line in (ROOT / "golden.jsonl").read_text(encoding="utf-8").splitlines() if line]
     rows = rows[: args.limit] if args.limit else rows
     config = settings()
     embeddings = embedding_model(config)
     chat = None if args.no_generate else chat_model(config)
+    reranker = CrossEncoderReranker(args.rerank, cache_dir="/models") if args.rerank else None
     judge = chat_model(config.model_copy(update={"chat_model": args.judge})) if args.judge else None
 
     results = []
@@ -110,7 +116,12 @@ async def main() -> None:
         t0 = time.perf_counter()
         with engine().begin() as connection:
             set_tenant(connection, tenant)
-            chunks = await retrieve(connection, kb, row["question"], embeddings, args.top_k)
+            chunks = await retrieve(
+                connection, kb, row["question"], embeddings,
+                args.candidates if reranker else args.top_k, mode=args.mode,
+            )
+        if reranker:  # score the candidate pool with the cross-encoder, keep the best top_k
+            chunks = await asyncio.to_thread(reranker.rerank, row["question"], chunks, args.top_k)
         retrieval_s = time.perf_counter() - t0
         docs = [c.document_name.removesuffix(".pdf") for c in chunks]
         gold = set(row["doc_ids"])
@@ -157,7 +168,7 @@ def summarize(results: list[dict], args) -> dict:
     answerable = [r for r in results if r["answerable"]]
     unanswerable = [r for r in results if not r["answerable"]]
     summary = {
-        "config": {"top_k": args.top_k, "chat_model": settings().chat_model, "judge": args.judge,
+        "config": {"top_k": args.top_k, "mode": args.mode, "rerank": args.rerank, "candidates": args.candidates if args.rerank else None, "kb": args.kb or "default", "chat_model": settings().chat_model, "judge": args.judge,
                    "embedding_model": settings().embedding_model, "questions": len(results)},
         "retrieval": {k: rate(answerable, k) for k in ("doc_hit", "doc_recall", "mrr", "passage_recall")},
         "retrieval_by_type": {

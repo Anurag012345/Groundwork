@@ -1,8 +1,10 @@
 """Upload every corpus PDF to the eval stack's knowledge base through the real API and index it.
 
-Usage: python evals/ingest.py [--api http://localhost:8010]
-Needs evals/.eval_key and evals/.eval_kb (written when the eval tenant and knowledge base were
-created). Re-runnable: indexed documents are skipped; failed or half-done ones are deleted and redone.
+Usage: python evals/ingest.py [--api http://localhost:8010] [--name VARIANT]
+Needs evals/.eval_key (the eval tenant's API key). Creates the knowledge base on first use and
+records its id in evals/.eval_kb[_VARIANT]. A variant is a separate knowledge base, e.g. one
+indexed with different CHUNK_MAX_TOKENS (set on the API container before ingesting).
+Re-runnable: indexed documents are skipped; failed or half-done ones are deleted and redone.
 """
 
 import argparse
@@ -20,10 +22,16 @@ SKIP = {"103277"}
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--api", default="http://localhost:8010")
+    parser.add_argument("--name", default="", help="variant name; empty is the default knowledge base")
     args = parser.parse_args()
     headers = {"Authorization": f"Bearer {(ROOT / '.eval_key').read_text().strip()}"}
-    kb = (ROOT / ".eval_kb").read_text().strip()
     client = httpx.Client(base_url=args.api, headers=headers, timeout=900)
+    kb_file = ROOT / f".eval_kb{args.name and '_' + args.name}"
+    if not kb_file.exists():
+        created = client.post("/v1/knowledge-bases", json={"name": f"SEBI circulars 2026 {args.name}".strip()})
+        created.raise_for_status()
+        kb_file.write_text(created.json()["id"])
+    kb = kb_file.read_text().strip()
 
     existing = {d["name"]: d for d in client.get(f"/v1/knowledge-bases/{kb}/documents").json()["items"]}
     pdfs = [p for p in sorted((ROOT / "corpus").glob("*.pdf")) if p.stem not in SKIP]

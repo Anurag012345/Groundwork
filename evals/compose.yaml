@@ -19,14 +19,14 @@ services:
       timeout: 5s
       retries: 10
   migrate:
-    build: ../apps/api
+    build: {context: ../apps/api, dockerfile: ../../evals/Dockerfile}
     environment:
       MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:eval-admin@db:5432/rag
     command: ["alembic", "upgrade", "head"]
     depends_on:
       db: {condition: service_healthy}
   api:
-    build: ../apps/api
+    build: {context: ../apps/api, dockerfile: ../../evals/Dockerfile}
     environment:
       DATABASE_URL: postgresql+psycopg://rag_app:eval-runtime@db:5432/rag
       MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:eval-admin@db:5432/rag
@@ -38,12 +38,16 @@ services:
       EMBEDDING_MODEL: nomic-embed-text
       EMBEDDING_DIMENSIONS: "768"
       UPLOAD_MAX_BYTES: "41943040"
+      CHUNK_MAX_TOKENS: ${CHUNK_MAX_TOKENS:-450}
+      CHUNK_OVERLAP_TOKENS: ${CHUNK_OVERLAP_TOKENS:-60}
     ports: ["127.0.0.1:8010:8000"]
     volumes:
       - eval_uploads:/app/data
+      - eval_models:/models
       - ./:/evals  # run_eval.py runs in here, against the same code the API serves
     depends_on:
       migrate: {condition: service_completed_successfully}
 volumes:
   eval_pg:
   eval_uploads:
+  eval_models:
