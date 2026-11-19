@@ -1,9 +1,11 @@
+import asyncio
 import hashlib
 import json
 import logging
 import re
 import time
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -24,11 +26,20 @@ from rag.ingestion.parsers import DocumentParseError, document_kind
 from rag.ingestion.processor import IngestionBusy, IngestionFailed, process_ingestion_job
 from rag.providers.base import ProviderError
 from rag.providers.factory import chat_model, embedding_model
+from rag.rerank import reranker
 from rag.retrieval import retrieve
 from rag.security import SessionDependency, WidgetDependency, new_public_key
 from rag.storage import LocalStorage
 
-app = FastAPI(title="RAG Service API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app):
+    # Load the reranker now so a missing package or model fails startup, not a visitor's question.
+    await asyncio.to_thread(reranker, settings().reranker_model)
+    yield
+
+
+app = FastAPI(title="RAG Service API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings().cors_origins,
@@ -152,13 +163,16 @@ async def prepare_grounded_chat(data: ChatInput, connection):
     )
     embeddings = embedding_model(model_config)
     try:
+        cross_encoder = reranker(settings().reranker_model)
         chunks = await retrieve(
             connection,
             data.knowledge_base_id,
             data.question,
             embeddings,
-            data.top_k,
+            max(settings().reranker_candidates, data.top_k) if cross_encoder else data.top_k,
         )
+        if cross_encoder:
+            chunks = await asyncio.to_thread(cross_encoder.rerank, data.question, chunks, data.top_k)
     finally:
         await embeddings.client.aclose()
     return grounding_messages(data.question, chunks), citation_payload(chunks)

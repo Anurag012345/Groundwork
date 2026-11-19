@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     chunk_overlap_tokens: int = Field(default=60, ge=0)
     ingestion_max_chunks: int = Field(default=2000, gt=0)
     embedding_batch_size: int = Field(default=32, gt=0, le=256)
+    # Empty disables reranking. A fastembed cross-encoder name such as BAAI/bge-reranker-base
+    # re-scores the top candidates; it needs the image built with EXTRAS=rerank.
+    reranker_model: str = ""
+    reranker_candidates: int = Field(default=20, ge=1, le=50)
     ingestion_lease_seconds: int = Field(default=900, ge=60, le=3600)
 
 

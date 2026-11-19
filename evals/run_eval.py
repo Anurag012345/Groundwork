@@ -27,7 +27,7 @@ from rag.config import settings
 from rag.db import engine, set_tenant
 from rag.providers.base import ChatMessage
 from rag.providers.factory import chat_model, embedding_model
-from rag.rerank import CrossEncoderReranker
+from rag.rerank import reranker
 from rag.retrieval import retrieve
 from rag.security import tenant_from_key
 from scoring import abstained
@@ -94,7 +94,7 @@ async def main() -> None:
     config = settings()
     embeddings = embedding_model(config)
     chat = None if args.no_generate else chat_model(config)
-    reranker = CrossEncoderReranker(args.rerank, cache_dir="/models") if args.rerank else None
+    cross_encoder = reranker(args.rerank) if args.rerank else None
     judge = chat_model(config.model_copy(update={"chat_model": args.judge})) if args.judge else None
 
     results = []
@@ -104,10 +104,10 @@ async def main() -> None:
             set_tenant(connection, tenant)
             chunks = await retrieve(
                 connection, kb, row["question"], embeddings,
-                args.candidates if reranker else args.top_k, mode=args.mode,
+                args.candidates if cross_encoder else args.top_k, mode=args.mode,
             )
-        if reranker:  # score the candidate pool with the cross-encoder, keep the best top_k
-            chunks = await asyncio.to_thread(reranker.rerank, row["question"], chunks, args.top_k)
+        if cross_encoder:  # score the candidate pool with the cross-encoder, keep the best top_k
+            chunks = await asyncio.to_thread(cross_encoder.rerank, row["question"], chunks, args.top_k)
         retrieval_s = time.perf_counter() - t0
         docs = [c.document_name.removesuffix(".pdf") for c in chunks]
         gold = set(row["doc_ids"])

@@ -19,14 +19,14 @@ services:
       timeout: 5s
       retries: 10
   migrate:
-    build: {context: ../apps/api, dockerfile: ../../evals/Dockerfile}
+    build: {context: ../apps/api, args: {EXTRAS: rerank}}
     environment:
       MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:eval-admin@db:5432/rag
     command: ["alembic", "upgrade", "head"]
     depends_on:
       db: {condition: service_healthy}
   api:
-    build: {context: ../apps/api, dockerfile: ../../evals/Dockerfile}
+    build: {context: ../apps/api, args: {EXTRAS: rerank}}
     environment:
       DATABASE_URL: postgresql+psycopg://rag_app:eval-runtime@db:5432/rag
       MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:eval-admin@db:5432/rag
@@ -40,6 +40,8 @@ services:
       UPLOAD_MAX_BYTES: "41943040"
       CHUNK_MAX_TOKENS: ${CHUNK_MAX_TOKENS:-450}
       CHUNK_OVERLAP_TOKENS: ${CHUNK_OVERLAP_TOKENS:-60}
+      RERANKER_MODEL: ${RERANKER_MODEL:-}  # set to serve reranked answers; run_eval.py --rerank is separate
+      FASTEMBED_CACHE_PATH: /models
     ports: ["127.0.0.1:8010:8000"]
     volumes:
       - eval_uploads:/app/data

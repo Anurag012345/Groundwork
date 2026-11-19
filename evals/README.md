@@ -49,8 +49,8 @@ Chunk size is set when indexing, so each size is its own knowledge base: recreat
 `passage_recall` favours large chunks (a quote cannot straddle a boundary it never crosses), so
 compare chunk sizes on doc hit and MRR first.
 
-The reranker needs `fastembed` and a Hugging Face model; `evals/Dockerfile` adds the package and
-the `eval_models` volume caches the model (about 1 GB for bge-reranker-base).
+The reranker needs `fastembed` (the API image's `EXTRAS=rerank` build arg, set in `compose.yaml`) and a
+Hugging Face model; the `eval_models` volume caches it (about 1 GB for bge-reranker-base).
 
 ## What the numbers mean
 
