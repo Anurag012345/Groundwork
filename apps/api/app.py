@@ -6,6 +6,7 @@ import re
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
@@ -19,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from rag import tracing
 from rag.chat import FALLBACK_ANSWER, citation_payload, grounding_messages
 from rag.config import settings
 from rag.db import assert_runtime_role, engine
@@ -36,7 +38,9 @@ from rag.storage import LocalStorage
 async def lifespan(_app):
     # Load the reranker now so a missing package or model fails startup, not a visitor's question.
     await asyncio.to_thread(reranker, settings().reranker_model)
+    tracing.client()
     yield
+    tracing.shutdown()
 
 
 app = FastAPI(title="RAG Service API", version="0.1.0", lifespan=lifespan)
@@ -62,7 +66,8 @@ async def public_cors(request, call_next):
                 "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
                 "Access-Control-Allow-Headers": "Content-Type",
                 "Access-Control-Max-Age": "600",
-            } | {"Access-Control-Allow-Origin": origin, "Vary": "Origin"},
+            }
+            | {"Access-Control-Allow-Origin": origin, "Vary": "Origin"},
         )
     response = await call_next(request)
     # Errors carry the header too, otherwise the browser blocks the widget from
@@ -126,6 +131,29 @@ class ChatInput(BaseModel):
 
 
 async def prepare_grounded_chat(data: ChatInput, connection):
+    """Retrieve context for a question. Returns messages, sources and the open trace to finish."""
+    root = tracing.start(
+        "chat",
+        input=data.question,
+        metadata={"knowledge_base_id": str(data.knowledge_base_id), "top_k": data.top_k},
+    )
+    try:
+        messages, sources = await retrieve_context(data, connection, root)
+    except BaseException as error:
+        root.update(level="ERROR", status_message=repr(error)[:300])
+        root.end()
+        raise
+    return messages, sources, root
+
+
+def brief(chunks):
+    return [
+        {"document": c.document_name, "page": c.page_number, "score": round(c.score, 4)}
+        for c in chunks
+    ]
+
+
+async def retrieve_context(data: ChatInput, connection, root):
     knowledge_base = (
         connection.execute(
             text("""
@@ -164,15 +192,22 @@ async def prepare_grounded_chat(data: ChatInput, connection):
     embeddings = embedding_model(model_config)
     try:
         cross_encoder = reranker(settings().reranker_model)
-        chunks = await retrieve(
-            connection,
-            data.knowledge_base_id,
-            data.question,
-            embeddings,
-            max(settings().reranker_candidates, data.top_k) if cross_encoder else data.top_k,
-        )
+        limit = max(settings().reranker_candidates, data.top_k) if cross_encoder else data.top_k
+        with root.start_as_current_observation(
+            name="retrieve", as_type="retriever", input=data.question, metadata={"limit": limit}
+        ) as span:
+            chunks = await retrieve(
+                connection, data.knowledge_base_id, data.question, embeddings, limit
+            )
+            span.update(output=brief(chunks))
         if cross_encoder:
-            chunks = await asyncio.to_thread(cross_encoder.rerank, data.question, chunks, data.top_k)
+            with root.start_as_current_observation(
+                name="rerank", input=brief(chunks), metadata={"model": settings().reranker_model}
+            ) as span:
+                chunks = await asyncio.to_thread(
+                    cross_encoder.rerank, data.question, chunks, data.top_k
+                )
+                span.update(output=brief(chunks))
     finally:
         await embeddings.client.aclose()
     return grounding_messages(data.question, chunks), citation_payload(chunks)
@@ -204,6 +239,47 @@ def rate_limit(bucket: str, limit: int = 20, window: float = 60.0):
     # counts. Sample it, or move the window into PostgreSQL, if that stops holding.
     for idle in [key for key, hits in _asked.items() if not hits or now - hits[-1] > window]:
         del _asked[idle]
+
+
+async def answer_events(messages, sources, root):
+    """Stream the grounded answer as SSE events and finish the trace, whatever happens."""
+    if not messages:
+        root.update(
+            output=FALLBACK_ANSWER, metadata={"abstained": "knowledge base has no indexed chunks"}
+        )
+        root.end()
+        yield sse_event("token", {"text": FALLBACK_ANSWER})
+        yield sse_event("sources", [])
+        yield sse_event("done", {})
+        return
+
+    generator = chat_model(settings())
+    generation = root.start_observation(
+        name="generate",
+        as_type="generation",
+        model=settings().chat_model,
+        input=[{"role": m.role, "content": m.content} for m in messages],
+    )
+    answer = []
+    try:
+        async for token in generator.stream(messages):
+            if not answer:
+                generation.update(completion_start_time=datetime.now(UTC))
+            answer.append(token)
+            yield sse_event("token", {"text": token})
+        yield sse_event("sources", sources)
+        yield sse_event("done", {})
+    except ProviderError:
+        logging.getLogger("rag").warning("Model provider stream failed")
+        generation.update(level="ERROR", status_message="Model provider unavailable")
+        yield sse_event("error", {"detail": "Model provider unavailable"})
+    finally:
+        text = "".join(answer)
+        generation.update(output=text)
+        generation.end()
+        root.update(output=text)
+        root.end()
+        await generator.client.aclose()
 
 
 def sse_event(event: str, data) -> str:
@@ -415,10 +491,14 @@ async def upload_document(
 
 @app.delete("/v1/documents/{document_id}", status_code=204)
 def delete_document(document_id: UUID, session: SessionDependency):
-    keys = session.connection.execute(
-        text("SELECT DISTINCT storage_key FROM document_versions WHERE document_id=:id"),
-        {"id": document_id},
-    ).scalars().all()
+    keys = (
+        session.connection.execute(
+            text("SELECT DISTINCT storage_key FROM document_versions WHERE document_id=:id"),
+            {"id": document_id},
+        )
+        .scalars()
+        .all()
+    )
     deleted = session.connection.execute(
         text("DELETE FROM documents WHERE id=:id RETURNING id"), {"id": document_id}
     ).scalar_one_or_none()
@@ -558,29 +638,10 @@ async def process_job(job_id: UUID, session: SessionDependency):
 
 @app.post("/v1/chat/stream")
 async def stream_chat(data: ChatInput, session: SessionDependency):
-    messages, sources = await prepare_grounded_chat(data, session.connection)
-
-    async def events():
-        if not messages:
-            yield sse_event("token", {"text": FALLBACK_ANSWER})
-            yield sse_event("sources", [])
-            yield sse_event("done", {})
-            return
-
-        generator = chat_model(settings())
-        try:
-            async for token in generator.stream(messages):
-                yield sse_event("token", {"text": token})
-            yield sse_event("sources", sources)
-            yield sse_event("done", {})
-        except ProviderError:
-            logging.getLogger("rag").warning("Model provider stream failed")
-            yield sse_event("error", {"detail": "Model provider unavailable"})
-        finally:
-            await generator.client.aclose()
+    messages, sources, root = await prepare_grounded_chat(data, session.connection)
 
     return StreamingResponse(
-        events(),
+        answer_events(messages, sources, root),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -679,28 +740,10 @@ async def public_chat(data: QuestionInput, request: Request, widget: WidgetDepen
         knowledge_base_id=widget.chatbot["knowledge_base_id"],
         question=data.question,
     )
-    messages, sources = await prepare_grounded_chat(question, widget.connection)
-
-    async def events():
-        if not messages:
-            yield sse_event("token", {"text": FALLBACK_ANSWER})
-            yield sse_event("sources", [])
-            yield sse_event("done", {})
-            return
-        generator = chat_model(settings())
-        try:
-            async for token in generator.stream(messages):
-                yield sse_event("token", {"text": token})
-            yield sse_event("sources", sources)
-            yield sse_event("done", {})
-        except ProviderError:
-            logging.getLogger("rag").warning("Model provider stream failed")
-            yield sse_event("error", {"detail": "Model provider unavailable"})
-        finally:
-            await generator.client.aclose()
+    messages, sources, root = await prepare_grounded_chat(question, widget.connection)
 
     return StreamingResponse(
-        events(),
+        answer_events(messages, sources, root),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

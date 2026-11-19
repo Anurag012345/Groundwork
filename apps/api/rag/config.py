@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # re-scores the top candidates; it needs the image built with EXTRAS=rerank.
     reranker_model: str = ""
     reranker_candidates: int = Field(default=20, ge=1, le=50)
+    # Langfuse tracing is on when both keys are set (needs the image built with EXTRAS=trace).
+    langfuse_public_key: str = ""
+    langfuse_secret_key: SecretStr | None = None
+    langfuse_host: str = "https://cloud.langfuse.com"
     ingestion_lease_seconds: int = Field(default=900, ge=60, le=3600)
 
 

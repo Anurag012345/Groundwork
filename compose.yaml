@@ -42,6 +42,9 @@ services:
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-768}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       RERANKER_MODEL: ${RERANKER_MODEL:-}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
       # Trust X-Forwarded-For so the rate limiter sees the visitor, not caddy.
       # Only caddy and this server's own loopback can reach this port.
       FORWARDED_ALLOW_IPS: "*"
