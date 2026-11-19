@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import Connection, text
@@ -48,10 +49,12 @@ async def retrieve(
     model: EmbeddingModel,
     limit: int = 5,
     semantic_min_score: float = 0.2,
+    mode: Literal["hybrid", "dense", "sparse"] = "hybrid",
 ) -> list[RetrievedChunk]:
-    query_vector = (await model.embed([question]))[0]
+    # mode exists so evals can ablate one ranker; production always uses hybrid.
+    query_vector = [] if mode == "sparse" else (await model.embed([question]))[0]
     candidate_limit = max(limit * 3, 12)
-    semantic = [
+    semantic = [] if mode == "sparse" else [
         dict(row)
         for row in connection.execute(
             text("""
@@ -77,19 +80,22 @@ async def retrieve(
             },
         ).mappings()
     ]
-    keyword = [
+    # Stop words are dropped and the remaining terms are OR-ed: ANDing every word of a
+    # natural-language question matched no chunk for 117 of 122 eval questions.
+    keyword = [] if mode == "dense" else [
         dict(row)
         for row in connection.execute(
             text("""
                 SELECT c.id, c.content, c.document_id, d.name AS document_name,
                        c.page_number, c.section,
-                       ts_rank_cd(to_tsvector('simple', c.content), query) AS keyword_score
+                       ts_rank_cd(to_tsvector('english', c.content), q.query) AS keyword_score
                 FROM chunks c
                 JOIN documents d ON d.id = c.document_id,
-                     websearch_to_tsquery('simple', :question) query
+                     (SELECT replace(plainto_tsquery('english', :question)::text, '&', '|')
+                             ::tsquery AS query) q
                 WHERE c.knowledge_base_id = :kb_id
                   AND d.active_version_id = c.document_version_id
-                  AND to_tsvector('simple', c.content) @@ query
+                  AND to_tsvector('english', c.content) @@ q.query
                 ORDER BY keyword_score DESC
                 LIMIT :candidate_limit
             """),
