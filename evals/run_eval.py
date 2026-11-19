@@ -7,7 +7,7 @@ Per question it retrieves top-k chunks, builds the production grounding prompt, 
 answer, and records latency. Scores:
   retrieval   doc_hit@k, doc_recall, MRR (answerable) - does the right circular come back?
               passage_recall - is each verbatim evidence quote inside a retrieved chunk?
-  abstention  correct-refusal rate on unanswerable, false-refusal rate on answerable
+  abstention  correct-refusal rate on unanswerable, false-refusal rate on answerable (scoring.py)
   --judge M   answer correctness vs the reference, and faithfulness (answer supported by the
               retrieved chunks), both as YES/NO from judge model M, e.g. qwen3:8b
 Faithfulness here is one verdict per answer, a coarser stand-in for RAGAS claim-level scoring.
@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from uuid import UUID
 
-from rag.chat import FALLBACK_ANSWER, grounding_messages
+from rag.chat import grounding_messages
 from rag.config import settings
 from rag.db import engine, set_tenant
 from rag.providers.base import ChatMessage
@@ -30,25 +30,11 @@ from rag.providers.factory import chat_model, embedding_model
 from rag.rerank import CrossEncoderReranker
 from rag.retrieval import retrieve
 from rag.security import tenant_from_key
+from scoring import abstained
 
 ROOT = Path(__file__).parent
-REFUSAL = re.compile(
-    r"(couldn'?t|could not|cannot|can'?t|unable to) find|not (enough|sufficient) information"
-    r"|(does not|do not|doesn'?t|don'?t) (contain|provide|mention|specify|address|include|state)"
-    r"|no (relevant )?information|not (mentioned|specified|addressed|covered)",
-    re.I,
-)
-CITATION = re.compile(r"\[\d+\]")
-
-
 def squash(s: str) -> str:
     return re.sub(r"\s+", "", re.sub(r"\[\[page \d+\]\]|Page \d+ of \d+", "", s))
-
-
-def abstained(answer: str) -> bool:
-    if answer.strip() == FALLBACK_ANSWER:
-        return True
-    return bool(REFUSAL.search(answer)) and (not CITATION.search(answer) or len(answer) < 200)
 
 
 def percentile(values: list[float], q: int) -> float:
