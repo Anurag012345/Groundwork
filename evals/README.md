@@ -64,3 +64,18 @@ Hugging Face model; the `eval_models` volume caches it (about 1 GB for bge-reran
   models, so treat these as relative signals between variants, not absolute quality.
 - Latency is end to end on one local GPU that swaps the embedder, generator and judge in and out,
   so absolute numbers are inflated. Compare variants, not machines.
+
+## CI gate
+
+`gate.py` compares a run's summary with the committed `baseline.json` and exits non-zero when
+faithfulness (-0.03), answer correctness (-0.05), doc hit, MRR, correct refusals or false refusals
+move past their tolerance, or when the run config differs from the baseline's.
+
+```bash
+python evals/gate.py evals/results/<tag>.json            # check
+python evals/gate.py evals/results/<tag>.json --update   # accept a deliberate change as the new baseline
+```
+
+`.github/workflows/ci.yml` runs lint and unit tests on GitHub-hosted runners, then the full eval and
+the gate on a self-hosted runner labelled `rag-eval` (it needs Ollama, the ingested corpus and the
+eval stack from above). Set the repository variable `WSL_GATEWAY` if Ollama is reached via the relay.

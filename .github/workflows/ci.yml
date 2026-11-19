@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e "apps/api[dev]" -c apps/api/constraints.txt
+      - run: ruff check apps/api
+      - run: pytest -q
+        working-directory: apps/api
+      - run: python evals/scoring.py && python -m pytest -q evals/test_gate.py
+
+  # The eval needs Ollama (generator, embedder, judge) and the ingested SEBI corpus, so it runs
+  # on a self-hosted runner labelled `rag-eval` that already has the eval stack set up (see
+  # evals/README.md). It is skipped on forks and drafts; set repository variable WSL_GATEWAY if
+  # the stack reaches Ollama through the WSL relay.
+  eval-gate:
+    needs: test
+    if: github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, rag-eval]
+    timeout-minutes: 90
+    env:
+      COMPOSE: docker compose -p rag-eval -f evals/compose.yaml
+      WSL_GATEWAY: ${{ vars.WSL_GATEWAY }}
+      RERANKER_MODEL: BAAI/bge-reranker-base
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rebuild the API from this commit
+        run: $COMPOSE up -d --build api
+      - name: Run the golden set
+        run: >
+          $COMPOSE exec -T api python /evals/run_eval.py --rerank "$RERANKER_MODEL"
+          --judge qwen3:8b --tag ci
+      - name: Gate against evals/baseline.json
+        run: python evals/gate.py evals/results/ci.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results
+          path: evals/results/ci.json

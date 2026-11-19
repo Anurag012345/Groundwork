@@ -1,0 +1,41 @@
+{
+ "config": {
+  "top_k": 5,
+  "mode": "hybrid",
+  "rerank": "BAAI/bge-reranker-base",
+  "candidates": 20,
+  "kb": "default",
+  "chat_model": "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q5_K_M",
+  "judge": "qwen3:8b",
+  "embedding_model": "nomic-embed-text",
+  "questions": 122
+ },
+ "retrieval": {
+  "doc_hit": 1.0,
+  "doc_recall": 1.0,
+  "mrr": 0.958,
+  "passage_recall": 0.962
+ },
+ "retrieval_by_type": {
+  "factual": 1.0,
+  "multi_doc": 1.0,
+  "temporal": 1.0
+ },
+ "retrieval_latency_s": {
+  "p50": 6.677,
+  "p95": 7.351
+ },
+ "abstention": {
+  "correct_refusal_on_unanswerable": 1.0,
+  "false_refusal_on_answerable": 0.0
+ },
+ "latency_s": {
+  "p50": 12.79,
+  "p95": 16.16,
+  "ttft_p50": 4.92
+ },
+ "prompt_chars_max": 10827,
+ "answer_correct": 0.912,
+ "faithfulness": 0.98,
+ "abstention_rescored": true
+}
