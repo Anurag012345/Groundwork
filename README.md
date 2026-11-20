@@ -23,6 +23,11 @@ PostgreSQL with pgvector.
 - Embeddable widget in a shadow root, served at `/widget.js`, with a per-chatbot
   origin allowlist and in-process rate limiting.
 - Docker Compose services for PostgreSQL, migrations, the API, and the dashboard.
+- Optional cross-encoder reranker (`BAAI/bge-reranker-base`), off by default.
+- Document metadata and retrieval filters (`"filters": {"month": "jul-2026"}`).
+- Optional Langfuse tracing of retrieve, rerank and generate steps, off by default.
+- An eval harness with a 122-question golden set and a CI gate on faithfulness
+  regressions (see below).
 
 User login, conversation history, chatbot branding, and durable queue delivery are
 **not implemented**. Uploading a document only queues an ingestion job; the dashboard
@@ -34,6 +39,31 @@ The stack was first run end to end on 2026-09-13 (Docker on Linux, LM Studio as 
 model provider): migrations, the runtime role guard, the isolation test, upload →
 chat, and the widget in a browser. See [STATUS.md](STATUS.md) for what was verified
 and what was not.
+
+## Retrieval quality
+
+Measured on 92 SEBI circulars with a 122-question golden set (102 answerable, 20 not),
+using a local 4B generator and an 8B judge. Single runs, so read differences of a few
+questions as noise. Full tables, method and caveats are in [evals/RESULTS.md](evals/RESULTS.md).
+
+| Pipeline | Doc hit | MRR | Answer correct | False refusals | Faithful | p50 latency |
+|---|---|---|---|---|---|---|
+| Baseline (dense-equivalent) | 97.1% | 0.898 | 83.3% | 5.9% | 99% | 8.2 s |
+| Hybrid search + reranker | 100% | 0.958 | 91.2% | 0% | 98% | 12.8 s |
+
+- The reranker is the change that helped: +8 points of answer correctness for about
+  4.6 s more latency. It is off unless you set `RERANKER_MODEL` (see `.env.example`).
+- Hybrid search alone did not beat dense search on this set. Its keyword half was
+  matching almost nothing until a query bug was fixed.
+- 450-token chunks work best once the reranker is on.
+- Still wrong: about 9 answerable questions, mostly circulars that supersede or
+  contradict each other. Retrieval already finds the right circular for all of them.
+- Cost per 1,000 queries has not been measured (all models are local).
+
+`evals/` holds the corpus tooling, the golden set, the runner and
+`evals/gate.py`, which the CI workflow (`.github/workflows/ci.yml`) uses to fail a
+change that drops faithfulness, correctness or retrieval below the committed
+baseline. The eval job needs a self-hosted runner with Ollama; see `evals/README.md`.
 
 ## Quick start with Docker Desktop
 
