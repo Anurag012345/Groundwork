@@ -8,6 +8,7 @@ Re-runnable: indexed documents are skipped; failed or half-done ones are deleted
 """
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -17,6 +18,8 @@ import httpx
 ROOT = Path(__file__).parent
 # 103277 is a scanned image with no text layer; the pipeline would reject it as empty.
 SKIP = {"103277"}
+# Each document is tagged with the month SEBI published it, so questions can filter on it.
+MANIFEST = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
 
 
 def main() -> int:
@@ -38,12 +41,16 @@ def main() -> int:
     failed, started = [], time.time()
     for n, pdf in enumerate(pdfs, 1):
         old = existing.get(pdf.name)
+        tags = {"month": MANIFEST[pdf.stem]["month"]}
         if old and old["status"] == "indexed":
+            if old["metadata"] != tags:  # tag already-indexed documents without reindexing them
+                client.put(f"/v1/documents/{old['id']}/metadata", json={"metadata": tags}).raise_for_status()
             continue
         if old:
             client.delete(f"/v1/documents/{old['id']}").raise_for_status()
         t0 = time.time()
-        up = client.post(f"/v1/knowledge-bases/{kb}/documents", files={"file": (pdf.name, pdf.read_bytes())})
+        up = client.post(f"/v1/knowledge-bases/{kb}/documents", files={"file": (pdf.name, pdf.read_bytes())},
+                      data={"metadata": json.dumps(tags)})
         up.raise_for_status()
         done = client.post(f"/v1/ingestion-jobs/{up.json()['job_id']}/process")
         if done.status_code != 200:

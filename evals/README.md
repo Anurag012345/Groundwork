@@ -52,6 +52,13 @@ compare chunk sizes on doc hit and MRR first.
 The reranker needs `fastembed` (the API image's `EXTRAS=rerank` build arg, set in `compose.yaml`) and a
 Hugging Face model; the `eval_models` volume caches it (about 1 GB for bge-reranker-base).
 
+## Metadata filters
+
+Documents carry flat key/values (`ingest.py` tags each circular with its publication `month`). Pass
+`metadata` (a JSON object) when uploading, change it later with `PUT /v1/documents/{id}/metadata`
+(no reindex), and restrict a question with `"filters": {"month": "jul-2026"}` on `/v1/chat/stream`.
+A document must match every pair; filters that match nothing give the "couldn't find" answer.
+
 ## What the numbers mean
 
 - `doc_hit` / `doc_recall` / `mrr`: whether the right circular is in the top-k chunks, and how high.

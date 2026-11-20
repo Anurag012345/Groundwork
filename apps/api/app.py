@@ -13,10 +13,10 @@ from typing import Annotated
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, ValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -123,11 +123,20 @@ class KnowledgeBaseInput(BaseModel):
     description: str = Field(default="", max_length=1000)
 
 
+# Flat key/values a document is tagged with and a question can filter on, e.g. {"month": "nov-2026"}.
+Scalar = Annotated[str, StringConstraints(max_length=200)] | int | float | bool
+Metadata = Annotated[
+    dict[Annotated[str, StringConstraints(max_length=64)], Scalar], Field(max_length=20)
+]
+
+
 class ChatInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     knowledge_base_id: UUID
     question: str = Field(min_length=1, max_length=4000)
     top_k: int = Field(default=5, ge=1, le=10)
+    # Only documents whose metadata contains every pair here are searched.
+    filters: Metadata = {}
 
 
 async def prepare_grounded_chat(data: ChatInput, connection):
@@ -197,7 +206,12 @@ async def retrieve_context(data: ChatInput, connection, root):
             name="retrieve", as_type="retriever", input=data.question, metadata={"limit": limit}
         ) as span:
             chunks = await retrieve(
-                connection, data.knowledge_base_id, data.question, embeddings, limit
+                connection,
+                data.knowledge_base_id,
+                data.question,
+                embeddings,
+                limit,
+                filters=data.filters,
             )
             span.update(output=brief(chunks))
         if cross_encoder:
@@ -371,7 +385,7 @@ def delete_knowledge_base(kb_id: UUID, session: SessionDependency):
 def documents(kb_id: UUID, session: SessionDependency):
     rows = session.connection.execute(
         text("""
-            SELECT d.id, d.name, d.source_type, d.created_at,
+            SELECT d.id, d.name, d.source_type, d.metadata, d.created_at,
                    latest.id AS version_id, latest.version, latest.status,
                    latest.byte_size, latest.error_message
             FROM documents d
@@ -394,8 +408,15 @@ async def upload_document(
     kb_id: UUID,
     session: SessionDependency,
     file: Annotated[UploadFile, File()],
+    metadata: Annotated[str, Form()] = "{}",
 ):
     filename = safe_filename(file.filename)
+    try:
+        tags = TypeAdapter(Metadata).validate_json(metadata)
+    except ValidationError as error:
+        raise HTTPException(
+            422, f"metadata must be a flat JSON object: {error.errors()[0]['msg']}"
+        ) from error
     try:
         source_type = document_kind(filename)
     except DocumentParseError as error:
@@ -427,8 +448,8 @@ async def upload_document(
     try:
         session.connection.execute(
             text("""
-                INSERT INTO documents(id, tenant_id, knowledge_base_id, name, source_type)
-                VALUES (:id, :tenant_id, :kb_id, :name, :source_type)
+                INSERT INTO documents(id, tenant_id, knowledge_base_id, name, source_type, metadata)
+                VALUES (:id, :tenant_id, :kb_id, :name, :source_type, CAST(:metadata AS jsonb))
             """),
             {
                 "id": document_id,
@@ -436,6 +457,7 @@ async def upload_document(
                 "kb_id": kb_id,
                 "name": filename,
                 "source_type": source_type,
+                "metadata": json.dumps(tags),
             },
         )
         session.connection.execute(
@@ -487,6 +509,23 @@ async def upload_document(
         "status": "queued",
         "byte_size": len(content),
     }
+
+
+class MetadataInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    metadata: Metadata
+
+
+@app.put("/v1/documents/{document_id}/metadata")
+def set_document_metadata(document_id: UUID, data: MetadataInput, session: SessionDependency):
+    """Replace a document's metadata. No reindex needed: filters read it at query time."""
+    updated = session.connection.execute(
+        text("UPDATE documents SET metadata=CAST(:metadata AS jsonb) WHERE id=:id"),
+        {"id": document_id, "metadata": json.dumps(data.metadata)},
+    ).rowcount
+    if not updated:
+        raise HTTPException(404, "Document not found")
+    return {"id": document_id, "metadata": data.metadata}
 
 
 @app.delete("/v1/documents/{document_id}", status_code=204)
