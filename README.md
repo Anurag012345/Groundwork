@@ -1,4 +1,4 @@
-# Knowledge Studio
+# Groundwork
 
 A multi-tenant RAG service with an embeddable website chatbot, delivered as a Docker
 Compose install on a client's own server. Next.js dashboard, FastAPI backend,

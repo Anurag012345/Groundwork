@@ -1,4 +1,4 @@
-# Knowledge Studio — Status
+# Groundwork — Status
 
 Assessed 2026-09-13 by reading the code and running every check the README
 documents. Where this contradicts `README.md` or `IMPLEMENTATION_ROADMAP.md`,

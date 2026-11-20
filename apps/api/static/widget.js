@@ -1,4 +1,4 @@
-// Knowledge Studio chat widget. One file, no build step, no dependencies.
+// Groundwork chat widget. One file, no build step, no dependencies.
 // Embed:
 //   <script src="https://your-host/widget.js" data-key="ragpub_..." defer></script>
 // Everything lives in a shadow root so the host page's CSS cannot reach in and
@@ -10,7 +10,7 @@
   if (!script) return;
   var publicKey = script.getAttribute("data-key");
   if (!publicKey) {
-    console.error("[knowledge-studio] the embed snippet is missing data-key");
+    console.error("[groundwork] the embed snippet is missing data-key");
     return;
   }
   // Default to the origin serving this file, which is the API that answers it.

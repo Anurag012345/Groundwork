@@ -1,4 +1,4 @@
-# Knowledge Studio — Runbook
+# Groundwork — Runbook
 
 For whoever operates an installation on a client's server. Every command runs
 from the directory that holds `compose.yaml`. Nothing here needs a developer.
@@ -34,7 +34,7 @@ Requirements on the server:
 Steps:
 
 ```bash
-git clone <repository> knowledge-studio && cd knowledge-studio
+git clone <repository> groundwork && cd groundwork
 cp .env.example .env
 ```
 
