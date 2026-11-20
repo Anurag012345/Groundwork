@@ -59,6 +59,8 @@ Documents carry flat key/values (`ingest.py` tags each circular with its publica
 (no reindex), and restrict a question with `"filters": {"month": "jul-2026"}` on `/v1/chat/stream`.
 A document must match every pair; filters that match nothing give the "couldn't find" answer.
 
+A `published` key (ISO date) is special: retrieval returns it, each source is shown to the model with that date, and the prompt says the most recently published source governs when sources disagree (a later circular supersedes an earlier one). `ingest.py` fills it from the circular's first page (`dates.py`).
+
 ## What the numbers mean
 
 - `doc_hit` / `doc_recall` / `mrr`: whether the right circular is in the top-k chunks, and how high.

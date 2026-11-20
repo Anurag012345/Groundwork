@@ -50,14 +50,18 @@ questions as noise. Full tables, method and caveats are in [evals/RESULTS.md](ev
 |---|---|---|---|---|---|---|
 | Baseline (dense-equivalent) | 97.1% | 0.898 | 83.3% | 5.9% | 99% | 8.2 s |
 | Hybrid search + reranker | 100% | 0.958 | 91.2% | 0% | 98% | 12.8 s |
+| + published dates and recency rule | 100% | 0.958 | 96.1% | 0% | 97% | 15.5 s |
 
 - The reranker is the change that helped: +8 points of answer correctness for about
   4.6 s more latency. It is off unless you set `RERANKER_MODEL` (see `.env.example`).
 - Hybrid search alone did not beat dense search on this set. Its keyword half was
   matching almost nothing until a query bug was fixed.
 - 450-token chunks work best once the reranker is on.
-- Still wrong: about 9 answerable questions, mostly circulars that supersede or
-  contradict each other. Retrieval already finds the right circular for all of them.
+- Showing the model each source's published date, with a "latest governs" rule, took
+  correctness from 91.2% to 96.1%. About 3 of those 5 questions are date cases; the rest
+  look like noise. The rule also makes the model wrongly treat an unrelated later circular
+  as a replacement in 2 questions.
+- Still wrong: 4 answerable questions. Retrieval finds the right circular for all of them.
 - Cost per 1,000 queries has not been measured (all models are local).
 
 `evals/` holds the corpus tooling, the golden set, the runner and

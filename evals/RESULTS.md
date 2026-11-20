@@ -34,6 +34,7 @@ search on this set, and the best chunk size depends on which metric you read.
 |---|---|---|---|---|---|---|---|---|---|
 | Baseline (dense-equivalent, see note) | 97.1% | 0.898 | 91.7% | 100% | 5.9% (6/102) | 83.3% | 99.0% | 8.17 | 13.12 |
 | Hybrid + reranker | 100.0% | 0.958 | 96.2% | 100% | 0.0% | 91.2% | 98.0% | 12.79 | 16.16 |
+| Hybrid + reranker + published dates and recency rule (section 6) | 100.0% | 0.958 | 96.2% | 100% | 0.0% | 96.1% | 97.0% | 15.54 | 20.39 |
 
 - The baseline was run before the keyword-search fix in section 3, so its "hybrid" was in practice
   dense-only. This row therefore compares two changes together (fixed keyword search plus the
@@ -119,12 +120,34 @@ model's rate or GPU time priced at a hardware rate. The largest prompt in the ru
 
 ## 6. Where answers are still wrong
 
-After reranking, 9 of 102 answerable questions are still marked wrong. The ones I looked at are
-cases where circulars supersede or contradict each other, and the model picks the wrong one or
-blends them: q005 (a date changed by a later addendum), q075 and q076 (30 days against 10 working
-days), q053, q095 and q002. Retrieval already finds the right circular for 100% of questions, so
-this is a generation and conflict-resolution problem, not a retrieval one. A recency or
-supersession rule using the document metadata is the obvious next step.
+After reranking, 9 of 102 answerable questions were wrong. Retrieval already found the right
+circular for all of them, so this is a generation problem. Several were circulars that supersede
+each other (q005, q029, q075, q076), and the model picked the wrong one or blended them.
+
+**The supersession fix.** Each document now carries the date printed on its first page
+(`evals/dates.py`, stored as the `published` metadata key). Each source is shown to the model with
+that date, and the system prompt says the most recently published source governs when sources
+disagree about the same rule. Run `supersession`, same config as the run above: answer correct
+**91.2% to 96.1%** (93 to 98 of 102), no question that was right became wrong, gate passes.
+
+- Fixed: q002, q029, q075, q076, q094. I expected q029, q075 and q076. q002 (an incomplete list)
+  and q094 (a judge-strictness case) are not about dates, so treat those two as noise or a side
+  effect of the new prompt, not as evidence for the fix. The honest gain from dates is about 3
+  questions.
+- Still wrong: q005, q028, q053, q095.
+  - q005: the model called the March 25 addendum the latest source when the July 10 circular
+    was also in its context, so it compared dates badly.
+  - q095 and q028: **false supersession.** The model took a later circular on a different subject
+    (the depositories' Investor Protection Fund, FPI KYC review) as replacing the earlier effective
+    date. "Most recent governs" is only right when the later circular is about the same rule, and
+    the prompt wording does not stop the 4B model from applying it across subjects. This is a new
+    failure mode the rule introduced, even though these two were already wrong before it.
+  - q053: the model assigned the 10-minute session to the January circular and the 20-minute one
+    to October, the reverse of the sources. Not a date problem.
+- Faithfulness moved 98% to 97% (q007 and q019 became unfaithful, q076 became faithful), within
+  judge noise. p50 latency rose from 12.8 s to 15.5 s, but retrieval p50 also rose from 6.7 s to
+  8.1 s with identical retrieval, so the machine was busier. I would not read that as the cost of
+  the fix.
 
 ## Caveats
 
@@ -136,6 +159,8 @@ supersession rule using the document metadata is the obvious next step.
   figure by a couple of points.
 - Reciprocal-rank-fusion weights and the semantic score floor (0.2) were not tuned.
 - The metadata filters added later are not covered by any golden question.
+- The supersession run is one run of a prompt I wrote after reading the failures, so it is tuned on
+  this set. A fresh set with different supersession cases would tell whether the 5 points hold.
 
 ## Reproduce
 

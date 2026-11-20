@@ -18,6 +18,8 @@ class RetrievedChunk:
     page_number: int | None
     section: str | None
     score: float
+    # ISO date from the document's `published` metadata, when it has one.
+    published: str | None = None
 
 
 def reciprocal_rank_fusion(
@@ -38,6 +40,7 @@ def reciprocal_rank_fusion(
             page_number=item["row"]["page_number"],
             section=item["row"]["section"],
             score=item["score"],
+            published=item["row"].get("published"),
         )
         for item in ranked
     ]
@@ -66,7 +69,7 @@ async def retrieve(
             for row in connection.execute(
                 text("""
                 SELECT c.id, c.content, c.document_id, d.name AS document_name,
-                       c.page_number, c.section,
+                       c.page_number, c.section, d.metadata->>'published' AS published,
                        1 - (c.embedding <=> CAST(:embedding AS vector)) AS semantic_score
                 FROM chunks c
                 JOIN documents d ON d.id = c.document_id
@@ -100,7 +103,7 @@ async def retrieve(
             for row in connection.execute(
                 text("""
                 SELECT c.id, c.content, c.document_id, d.name AS document_name,
-                       c.page_number, c.section,
+                       c.page_number, c.section, d.metadata->>'published' AS published,
                        ts_rank_cd(to_tsvector('english', c.content), q.query) AS keyword_score
                 FROM chunks c
                 JOIN documents d ON d.id = c.document_id,

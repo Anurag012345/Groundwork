@@ -14,11 +14,12 @@ import time
 from pathlib import Path
 
 import httpx
+from dates import issue_date
 
 ROOT = Path(__file__).parent
 # 103277 is a scanned image with no text layer; the pipeline would reject it as empty.
 SKIP = {"103277"}
-# Each document is tagged with the month SEBI published it, so questions can filter on it.
+# Each document is tagged with its month (for filters) and issue date (so answers can prefer the latest circular).
 MANIFEST = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
 
 
@@ -42,6 +43,8 @@ def main() -> int:
     for n, pdf in enumerate(pdfs, 1):
         old = existing.get(pdf.name)
         tags = {"month": MANIFEST[pdf.stem]["month"]}
+        if published := issue_date((ROOT / "text" / f"{pdf.stem}.txt").read_text(encoding="utf-8")):
+            tags["published"] = published
         if old and old["status"] == "indexed":
             if old["metadata"] != tags:  # tag already-indexed documents without reindexing them
                 client.put(f"/v1/documents/{old['id']}/metadata", json={"metadata": tags}).raise_for_status()
