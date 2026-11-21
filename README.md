@@ -43,14 +43,15 @@ and what was not.
 ## Retrieval quality
 
 Measured on 92 SEBI circulars with a 122-question golden set (102 answerable, 20 not),
-using a local 4B generator and an 8B judge. Single runs, so read differences of a few
-questions as noise. Full tables, method and caveats are in [evals/RESULTS.md](evals/RESULTS.md).
+using a local 4B generator and an 8B judge. Mostly single runs. Repeating the same run
+three times moved correctness and faithfulness by up to 3 points, so treat smaller
+differences as noise. Full tables, method and caveats are in [evals/RESULTS.md](evals/RESULTS.md).
 
 | Pipeline | Doc hit | MRR | Answer correct | False refusals | Faithful | p50 latency |
 |---|---|---|---|---|---|---|
 | Baseline (dense-equivalent) | 97.1% | 0.898 | 83.3% | 5.9% | 99% | 8.2 s |
 | Hybrid search + reranker | 100% | 0.958 | 91.2% | 0% | 98% | 12.8 s |
-| + published dates and recency rule | 100% | 0.958 | 96.1% | 0% | 97% | 15.5 s |
+| + published dates and recency rule (3 runs, mean) | 100% | 0.958 | 95.8% | 0% | 97% | 14.0 s |
 
 - The reranker is the change that helped: +8 points of answer correctness for about
   4.6 s more latency. It is off unless you set `RERANKER_MODEL` (see `.env.example`).
@@ -58,9 +59,9 @@ questions as noise. Full tables, method and caveats are in [evals/RESULTS.md](ev
   matching almost nothing until a query bug was fixed.
 - 450-token chunks work best once the reranker is on.
 - Showing the model each source's published date, with a "latest governs" rule, took
-  correctness from 91.2% to 96.1%. About 3 of those 5 questions are date cases; the rest
-  look like noise. The rule also makes the model wrongly treat an unrelated later circular
-  as a replacement in 2 questions.
+  correctness from 91.2% to 95.8% (mean of 3 runs, range 94.1% to 97.1%). The gain is
+  real but only a little larger than the run-to-run spread. The rule also makes the model
+  wrongly treat an unrelated later circular as a replacement in 2 questions.
 - Still wrong: 4 answerable questions. Retrieval finds the right circular for all of them.
 - Cost per 1,000 queries: about 2.2M input and 0.12M output tokens. At an assumed $0.10 / $0.30
   per million that is $0.26; on a rented $0.50/hour GPU it is about $1.08. Models here are local,

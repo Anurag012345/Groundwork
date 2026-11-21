@@ -17,9 +17,10 @@ the runs saved in `evals/results/` (git-ignored); the numbers below are copied f
 | Generator | `Qwen3-4B-Instruct-2507` (Q5_K_M) through Ollama |
 | Judge | `qwen3:8b`, one YES/NO per answer for correctness and for faithfulness |
 
-Every number is from a single run. Retrieval metrics are deterministic. Answer metrics depend on a
-small generator and a small judge, so a difference of a few questions is noise (one question is
-about 1 point on 102).
+Every number is from a single run except section 7, which repeats one pipeline three times.
+Retrieval metrics are deterministic. Answer metrics depend on a small generator and a small judge,
+and the repeats show they move by up to 3 points between identical runs (one question is about
+1 point on 102).
 
 ## Headline
 
@@ -173,13 +174,44 @@ disagree about the same rule. Run `supersession`, same config as the run above: 
   it was not what limited the score: the 4B model also mixes up which source says what. The
   difference from the first prompt is within single-run noise either way.
 - Faithfulness moved 98% to 97% (q007 and q019 became unfaithful, q076 became faithful), within
-  judge noise. p50 latency rose from 12.8 s to 15.5 s, but retrieval p50 also rose from 6.7 s to
-  8.1 s with identical retrieval, so the machine was busier. I would not read that as the cost of
+  judge noise. p50 latency read 15.5 s against 12.8 s, but retrieval p50 also rose from 6.7 s to
+  8.1 s with identical retrieval, so the machine was busier. Two repeats (section 7) gave 12.9 s and
+  13.6 s, which confirms it was not the cost of
   the fix.
+
+## 7. Run-to-run variance
+
+The runner sets no temperature or seed, so the generator and the judge sample at Ollama's defaults.
+To see how much a single run moves, I ran the committed pipeline (reranker, published dates, recency
+rule) three times with the same config: `supersession`, `var1` and `var2`. The first of the three
+shared the GPU with a stray duplicate process for its first 5 minutes, so read only its quality
+numbers, not its latency.
+
+| Metric | Run 1 | Run 2 | Run 3 | Mean | Range |
+|---|---|---|---|---|---|
+| Answer correct | 96.1% | 94.1% | 97.1% | 95.8% | 3.0 points |
+| Faithful | 97% | 99% | 96% | 97.3% | 3.0 points |
+| Doc hit / MRR | 100% / 0.958 | same | same | | none |
+| Correct refusal / false refusal | 100% / 0% | same | same | | none |
+| p50 latency | 15.5 s | 12.9 s | 13.6 s | 14.0 s | 2.7 s |
+
+- Retrieval is deterministic: doc hit, MRR and passage recall were identical in all three runs.
+- Correctness and faithfulness each have a standard deviation of about 1.5 points, with 3 runs.
+  A difference under about 3 points between two single runs is noise. That includes the 91.2% to
+  96.1% change in section 6: against the 3-run mean of 95.8% the gain is about 4.6 points, outside
+  the spread but not by much, and the 91.2% number is itself one run.
+- Two answerable questions were wrong in all three runs (q005, q028). Five more were wrong in some
+  runs only (q015, q021, q049, q053, q095). Those five are the noise.
+- Faithfulness verdicts changed between runs for 8 questions even though the totals moved by 3
+  points: the judge is the noisier half of the pipeline. I did not separate generator noise from
+  judge noise.
+- p50 latency varied by 2.7 s between identical runs, so latency differences under about 3 s on
+  this machine are not meaningful.
 
 ## Caveats
 
-- One run per variant, a 4B generator and an 8B judge. Treat answer metrics as relative signals.
+- One run per variant (only the final pipeline has 3, section 7), a 4B generator and an 8B judge.
+  Treat answer metrics as relative signals, good to about 3 points.
 - The golden set is mostly direct lookups, which is easy for dense retrieval. It would not
   separate rankers on vague or multi-hop questions.
 - Faithfulness is one YES/NO per answer, coarser than claim-level scoring such as RAGAS.
