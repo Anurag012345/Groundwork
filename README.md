@@ -62,7 +62,9 @@ questions as noise. Full tables, method and caveats are in [evals/RESULTS.md](ev
   look like noise. The rule also makes the model wrongly treat an unrelated later circular
   as a replacement in 2 questions.
 - Still wrong: 4 answerable questions. Retrieval finds the right circular for all of them.
-- Cost per 1,000 queries has not been measured (all models are local).
+- Cost per 1,000 queries: about 2.2M input and 0.12M output tokens. At an assumed $0.10 / $0.30
+  per million that is $0.26; on a rented $0.50/hour GPU it is about $1.08. Models here are local,
+  so these use assumed prices (`python evals/cost.py <tag>` takes yours).
 
 `evals/` holds the corpus tooling, the golden set, the runner and
 `evals/gate.py`, which the CI workflow (`.github/workflows/ci.yml`) uses to fail a

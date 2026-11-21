@@ -113,10 +113,28 @@ The reranker's cost grows with chunk length: 20 candidates at 200 tokens take ab
 at 450. In the full run it measured 6.7 s of retrieval at p50 because the CPU reranker competed with
 the GPU model for the machine.
 
-**Cost per 1,000 queries was not measured.** Every model here is local, so there is no per-token
-bill. A meaningful figure needs a stated assumption, such as tokens per query priced at a hosted
-model's rate or GPU time priced at a hardware rate. The largest prompt in the runs was about
-10.8k characters (roughly 2.7k tokens) plus a short answer.
+**Cost per 1,000 queries.** Every model here is local, so there is no bill; the figure below prices
+measured volume at rates I assumed, and `python evals/cost.py <tag>` recomputes it with yours.
+Token counts come from the generator's own tokenizer through Ollama: 4.02 characters per token on
+the corpus text and 4.77 on its answers (12 samples each), applied to the `supersession` run.
+
+| | Per query | Per 1,000 queries |
+|---|---|---|
+| Input tokens (question, 5 chunks, instructions) | about 2,230 | 2.23 M |
+| Output tokens | about 120 | 0.12 M |
+| Generation time on the GPU | 7.8 s | 2.2 GPU hours |
+
+| Assumption (not a quote) | Cost per 1,000 queries |
+|---|---|
+| Hosted small model at $0.10 / M input, $0.30 / M output | $0.26 |
+| Own GPU rented at $0.50 / hour, generation time only | $1.08 |
+
+Scale for other prices: $2.23 per $1/M of input price, $0.12 per $1/M of output price. Input
+tokens are about 95% of the volume, so the chunk count and chunk size set the cost; the answer
+barely matters. The GPU figure is high because generation time here includes the GPU swapping
+models in and out, and it assumes one query at a time with no batching. It excludes the CPU reranker
+(about 4 s per query), embedding the question, the database, and the judge, which only runs in evals.
+The 122 queries include the 20 unanswerable questions, which get short refusals.
 
 ## 6. Where answers are still wrong
 

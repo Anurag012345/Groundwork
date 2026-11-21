@@ -80,6 +80,13 @@ A `published` key (ISO date) is special: retrieval returns it, each source is sh
 faithfulness (-0.03), answer correctness (-0.05), doc hit, MRR, correct refusals or false refusals
 move past their tolerance, or when the run config differs from the baseline's.
 
+The committed baseline is the `supersession` run (answer correct 96.1%, with published dates and
+the recency rule). Correctness is allowed to fall 5 points, so a run that drops the recency rule
+(91.2%) still just passes; tighten `GATES` if you want that caught.
+
+`python evals/cost.py <tag>` prices a saved run's token volume and generation time per 1,000 queries
+at rates you pass (`--in-price`, `--out-price`, `--gpu-hour`); the defaults are assumptions.
+
 ```bash
 python evals/gate.py evals/results/<tag>.json            # check
 python evals/gate.py evals/results/<tag>.json --update   # accept a deliberate change as the new baseline

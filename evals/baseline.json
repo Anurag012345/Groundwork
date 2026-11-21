@@ -22,20 +22,20 @@
   "temporal": 1.0
  },
  "retrieval_latency_s": {
-  "p50": 6.677,
-  "p95": 7.351
+  "p50": 8.108,
+  "p95": 9.442
  },
  "abstention": {
   "correct_refusal_on_unanswerable": 1.0,
   "false_refusal_on_answerable": 0.0
  },
  "latency_s": {
-  "p50": 12.79,
-  "p95": 16.16,
-  "ttft_p50": 4.92
+  "p50": 15.54,
+  "p95": 20.39,
+  "ttft_p50": 5.03
  },
- "prompt_chars_max": 10827,
- "answer_correct": 0.912,
- "faithfulness": 0.98,
+ "prompt_chars_max": 11185,
+ "answer_correct": 0.961,
+ "faithfulness": 0.97,
  "abstention_rescored": true
 }
