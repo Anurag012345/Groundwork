@@ -18,17 +18,7 @@ numbers, and a CI gate fails any change that makes answers less faithful.
 
 **[Watch the 3.5-minute demo](docs/demo.mp4)** (8 MB, with voiceover). It is a real, unedited screen recording of the
 dashboard and API running locally with local models (Qwen3-4B generator, bge-reranker), at real speed, so the
-waits you see are real model latency. Only five circulars are uploaded in it, not the full 92. No slides. The voiceover is synthetic, generated locally with the Kokoro text-to-speech model from a script I wrote.
-
-| Time | What happens |
-|---|---|
-| 0:00 | Sign in with an email and password, create a knowledge base |
-| 0:18 | Upload five SEBI circulars as PDFs, each tagged with its month and published date |
-| 0:56 | Ask for the current Closing Auction Session timings: the answer uses the October 2026 circular, which replaced the January one, with page-level citations |
-| 1:27 | Ask the same question restricted to `month=jan-2026`: the answer now comes from the older circular only |
-| 1:57 | Ask when the intraday borrowing conditions apply (1 September 2026), with citations |
-| 2:28 | Ask about a penalty the circulars never mention: it says it could not find enough information |
-| 3:14 | Create a website chatbot and use its embeddable widget on a separate page (a simple page written for the demo) |
+waits you see are real model latency. Only five circulars are uploaded in it, not the full 92, and the page hosting the widget is a simple one written for the demo. No slides. The voiceover is synthetic, generated locally with the Kokoro text-to-speech model from a script I wrote.
 
 ## Results
 
