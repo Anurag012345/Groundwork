@@ -144,6 +144,16 @@ disagree about the same rule. Run `supersession`, same config as the run above: 
     failure mode the rule introduced, even though these two were already wrong before it.
   - q053: the model assigned the 10-minute session to the January circular and the 20-minute one
     to October, the reverse of the sources. Not a date problem.
+- **Tightened prompt (run `supersession2`).** I reworded the rule so a later source replaces an
+  earlier one only when both are about the same circular or rule, and sources on different
+  subjects never replace each other. Result: answer correct **95.1%** (97 of 102), one question
+  below the first prompt, so no measurable gain. q053 became right and q021 and q049 became wrong.
+  q049 is a new false refusal (false refusal 0% to 1%). In q028 the model now reasons correctly
+  that the FPI circular is a different subject, but then invents an issue date (October 2025, the
+  source says October 7, 2026) and answers wrongly from it. In q095 it still takes the date from
+  the unrelated depositories circular. So the explicit false-supersession reasoning went away, but
+  it was not what limited the score: the 4B model also mixes up which source says what. The
+  difference from the first prompt is within single-run noise either way.
 - Faithfulness moved 98% to 97% (q007 and q019 became unfaithful, q076 became faithful), within
   judge noise. p50 latency rose from 12.8 s to 15.5 s, but retrieval p50 also rose from 6.7 s to
   8.1 s with identical retrieval, so the machine was busier. I would not read that as the cost of
