@@ -88,8 +88,11 @@ configured to their requirements. That changes which work is required.
 - **QStash / staged queue delivery.** No serverless function time limit to fit
   inside.
 - **Billing and usage metering.** Invoiced per installation, not per token.
-- **Login, signup, self-serve onboarding.** You install it; you run
-  `rag.bootstrap` once during setup.
+- **Signup and self-serve onboarding.** You install it; you run
+  `rag.bootstrap` once during setup. Email-and-password sign-in for people inside a
+  tenant was added later (`rag.users`, migration 0006, `POST /v1/auth/login`). There
+  are no roles, no password reset by email and no sign-up page; an administrator
+  creates users from the command line.
 
 Checkpoint 11 (Vercel deployment readiness) is now almost entirely irrelevant.
 Docker Compose is the installer.

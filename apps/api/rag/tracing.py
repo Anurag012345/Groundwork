@@ -23,6 +23,9 @@ class _Off:
         return False
 
 
+OFF = _Off()
+
+
 @cache
 def client():
     config = settings()

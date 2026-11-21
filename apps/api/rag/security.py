@@ -29,6 +29,11 @@ def new_public_key(tenant_id: UUID) -> str:
     return f"ragpub_{tenant_id.hex}_{secrets.token_urlsafe(24)}"
 
 
+def new_session_token(tenant_id: UUID) -> str:
+    # "rags" has no underscore, so it cannot be mistaken for the "rag" of an API key.
+    return f"rags_{tenant_id.hex}_{secrets.token_urlsafe(32)}"
+
+
 def _tenant_hint(key: str, prefix: str, minimum: int) -> UUID:
     try:
         found, tenant, secret = key.split("_", 2)
@@ -36,7 +41,7 @@ def _tenant_hint(key: str, prefix: str, minimum: int) -> UUID:
             raise ValueError
         return UUID(hex=tenant)
     except ValueError:
-        raise HTTPException(401, "Invalid API key") from None
+        raise HTTPException(401, "Invalid credentials") from None
 
 
 def tenant_from_key(key: str) -> UUID:
@@ -47,28 +52,45 @@ def tenant_from_public_key(key: str) -> UUID:
     return _tenant_hint(key, "ragpub", 30)
 
 
+def tenant_from_session_token(token: str) -> UUID:
+    return _tenant_hint(token, "rags", 40)
+
+
 @dataclass
 class TenantSession:
     tenant_id: UUID
     connection: Connection
+    # Set when the caller signed in with a password, so that logout can end this session only.
+    session_hash: str | None = None
 
 
 def tenant_session(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]):
     if credentials is None:
-        raise HTTPException(401, "API key required")
+        raise HTTPException(401, "API key or session required")
     key = credentials.credentials
-    tenant_id = tenant_from_key(key)
+    signed_in = key.startswith("rags_")
+    tenant_id = tenant_from_session_token(key) if signed_in else tenant_from_key(key)
     with engine().begin() as connection:
         assert_runtime_role(connection)
         set_tenant(connection, tenant_id)
         # Tenant in the key is only a lookup hint. The full hash MUST match before access.
-        valid = connection.execute(
-            text("SELECT id FROM api_keys WHERE key_hash=:hash AND revoked_at IS NULL"),
-            {"hash": hash_key(key)},
-        ).scalar_one_or_none()
+        if signed_in:
+            valid = connection.execute(
+                text("""
+                    SELECT s.user_id FROM user_sessions s
+                    JOIN users u ON u.id = s.user_id AND u.tenant_id = s.tenant_id
+                    WHERE s.token_hash=:hash AND s.expires_at > now() AND u.disabled_at IS NULL
+                """),
+                {"hash": hash_key(key)},
+            ).scalar_one_or_none()
+        else:
+            valid = connection.execute(
+                text("SELECT id FROM api_keys WHERE key_hash=:hash AND revoked_at IS NULL"),
+                {"hash": hash_key(key)},
+            ).scalar_one_or_none()
         if valid is None:
-            raise HTTPException(401, "Invalid API key")
-        yield TenantSession(tenant_id, connection)
+            raise HTTPException(401, "Invalid or expired credentials")
+        yield TenantSession(tenant_id, connection, hash_key(key) if signed_in else None)
 
 
 SessionDependency = Annotated[TenantSession, Depends(tenant_session, scope="function")]

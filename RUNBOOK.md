@@ -69,11 +69,25 @@ docker compose run --rm migrate python -m rag.bootstrap --name "Client Name"
 
 The second command prints a tenant id and an API key. **The key is shown once
 and stored only as a hash.** Give it to the client's administrator over a
-private channel; it is the only credential for the dashboard.
+private channel; it signs in to the dashboard and calls the API directly.
 
-Open `https://<DOMAIN>`, paste the key, and on the *Website chatbots* panel set
-the API address to `https://<DOMAIN>` so the embed snippet is generated
-correctly.
+To let people sign in with an email and password instead of sharing that key,
+create a user for the tenant. The password is asked for twice at the prompt and is
+never taken from the command line; there is no self-registration:
+
+```bash
+docker compose run --rm migrate python -m rag.users add --tenant <tenant id> --email person@client.example
+docker compose run --rm migrate python -m rag.users passwd --tenant <tenant id> --email person@client.example
+docker compose run --rm migrate python -m rag.users disable --tenant <tenant id> --email person@client.example
+```
+
+Passwords need at least 12 characters. `passwd` and `disable` end that user's
+sessions at once. Sessions last `SESSION_HOURS` (default 12). An email can belong
+to one tenant only. Every user has the workspace's full access; there are no roles.
+
+Open `https://<DOMAIN>`, sign in (or choose "Use an API key instead" and paste
+the key), and on the *Website chatbots* panel set the API address to
+`https://<DOMAIN>` so the embed snippet is generated correctly.
 
 ## 3. Verify an install
 
@@ -199,7 +213,9 @@ Everything that belongs to the tenant cascades. The uploaded files under
 | Upload fails with 422 "could not parse" | — | The file is encrypted, scanned images only, or not really the type its extension claims. |
 | Widget shows nothing on the client's site | Browser console on that page | The snippet's `data-key` is wrong, or the page's origin is not in the chatbot's allowlist (the API returns 403). Add the exact scheme and host, e.g. `https://www.client.example`, in the dashboard. |
 | Widget answers "Too many questions just now" | — | 20 questions per minute per visitor address. Expected under abuse; if legitimate visitors hit it, they share an address (a corporate NAT). |
-| Dashboard says "Invalid API key" | — | The key is wrong or belongs to a deleted tenant. Keys cannot be recovered; see §8. |
+| Dashboard says "Invalid credentials" or "Invalid or expired credentials" | — | The API key is wrong or belongs to a deleted tenant (keys cannot be recovered; see §8), or a sign-in session has expired or the user was disabled. Sign in again. |
+| Sign-in says "Wrong email or password" | `python -m rag.users passwd` | Wrong password, or no such user. The message is the same on purpose. |
+| Sign-in says "Too many sign-in attempts" | — | 5 tries per minute per email and 20 per minute per address. Wait a minute. The dashboard reaches the API through its own server, so every dashboard sign-in comes from one address and shares the 20-per-minute limit; someone hammering the form can briefly block everyone. Nothing is locked beyond that minute. |
 | `api` restarts in a loop | `docker compose logs api` | Almost always a `.env` value: a base URL without `/v1`, an empty API key with `openai_compatible`, or a bad `CORS_ORIGINS` (must be a JSON list). |
 
 **Disk.** `postgres_data` grows with chunks and embeddings; `data/` grows with

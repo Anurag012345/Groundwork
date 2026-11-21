@@ -42,6 +42,13 @@ run_eval.py --no-generate --mode dense|sparse|hybrid --tag <tag>   # which ranke
 run_eval.py --no-generate --rerank BAAI/bge-reranker-base --tag <tag>   # top-20 candidates -> cross-encoder -> top-5
 ```
 
+`--rewrite` turns on query rewriting (the same `rag.search` code the API uses): the model rewrites the
+question, both versions are searched, the two rankings are fused, and the reranker still scores against the
+original question. `--golden golden_vague.jsonl` swaps in a second question set whose answerable questions
+are rewordings of the originals with the document names and exact terms removed; regenerate it with
+`python evals/vague.py` (needs Ollama; it keeps each original in `original_question`). The gate treats both
+flags as part of the configuration, so a rewrite run is never compared with a baseline that had none.
+
 Chunk size is set when indexing, so each size is its own knowledge base: recreate the API with
 `CHUNK_MAX_TOKENS=200 CHUNK_OVERLAP_TOKENS=30 docker compose ... up -d api`, run
 `python evals/ingest.py --name c200`, then pass `--kb c200` to the runner.

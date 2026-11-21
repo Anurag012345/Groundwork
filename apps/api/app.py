@@ -7,7 +7,7 @@ import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from functools import lru_cache
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlparse
@@ -21,6 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from rag import tracing
+from rag.accounts import authenticate
 from rag.chat import FALLBACK_ANSWER, citation_payload, grounding_messages
 from rag.config import settings
 from rag.db import assert_runtime_role, engine
@@ -29,7 +30,8 @@ from rag.ingestion.processor import IngestionBusy, IngestionFailed, process_inge
 from rag.providers.base import ProviderError
 from rag.providers.factory import chat_model, embedding_model
 from rag.rerank import reranker
-from rag.retrieval import retrieve
+from rag.rewrite import rewrite_query
+from rag.search import search
 from rag.security import SessionDependency, WidgetDependency, new_public_key
 from rag.storage import LocalStorage
 
@@ -155,13 +157,6 @@ async def prepare_grounded_chat(data: ChatInput, connection):
     return messages, sources, root
 
 
-def brief(chunks):
-    return [
-        {"document": c.document_name, "page": c.page_number, "score": round(c.score, 4)}
-        for c in chunks
-    ]
-
-
 async def retrieve_context(data: ChatInput, connection, root):
     knowledge_base = (
         connection.execute(
@@ -199,31 +194,26 @@ async def retrieve_context(data: ChatInput, connection, root):
         }
     )
     embeddings = embedding_model(model_config)
+    rewriting = chat_model(settings()) if settings().query_rewrite else None
     try:
-        cross_encoder = reranker(settings().reranker_model)
-        limit = max(settings().reranker_candidates, data.top_k) if cross_encoder else data.top_k
-        with root.start_as_current_observation(
-            name="retrieve", as_type="retriever", input=data.question, metadata={"limit": limit}
-        ) as span:
-            chunks = await retrieve(
-                connection,
-                data.knowledge_base_id,
-                data.question,
-                embeddings,
-                limit,
-                filters=data.filters,
-            )
-            span.update(output=brief(chunks))
-        if cross_encoder:
-            with root.start_as_current_observation(
-                name="rerank", input=brief(chunks), metadata={"model": settings().reranker_model}
-            ) as span:
-                chunks = await asyncio.to_thread(
-                    cross_encoder.rerank, data.question, chunks, data.top_k
-                )
-                span.update(output=brief(chunks))
+        chunks = await search(
+            connection,
+            data.knowledge_base_id,
+            data.question,
+            embeddings,
+            data.top_k,
+            cross_encoder=reranker(settings().reranker_model),
+            candidates=settings().reranker_candidates,
+            rewriter=partial(rewrite_query, rewriting) if rewriting else None,
+            filters=data.filters,
+            root=root,
+        )
     finally:
         await embeddings.client.aclose()
+        if rewriting:
+            await rewriting.client.aclose()
+    if not chunks:  # e.g. a filter nothing matches: say so, rather than ask the model with no sources
+        return [], []
     return grounding_messages(data.question, chunks), citation_payload(chunks)
 
 
@@ -236,15 +226,21 @@ def client_address(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def rate_limit(bucket: str, limit: int = 20, window: float = 60.0):
+def rate_limit(
+    bucket: str,
+    limit: int = 20,
+    window: float = 60.0,
+    message: str = "Too many questions just now. Please wait a moment.",
+):
     # ponytail: in-process counters, so the limit is per uvicorn worker. Move the
-    # window into PostgreSQL if an install ever runs more than one.
+    # window into PostgreSQL if an install ever runs more than one. Every bucket must
+    # use the default window: the sweep below ages all of them by the current call's.
     now = time.monotonic()
     asked = _asked[bucket]
     while asked and now - asked[0] > window:
         asked.popleft()
     if len(asked) >= limit:
-        raise HTTPException(429, "Too many questions just now. Please wait a moment.")
+        raise HTTPException(429, message)
     asked.append(now)
     # Buckets are per visitor address, so without this the dictionary grows for the
     # life of the process. Only the touched bucket ages on its own; the rest keep
@@ -259,7 +255,7 @@ async def answer_events(messages, sources, root):
     """Stream the grounded answer as SSE events and finish the trace, whatever happens."""
     if not messages:
         root.update(
-            output=FALLBACK_ANSWER, metadata={"abstained": "knowledge base has no indexed chunks"}
+            output=FALLBACK_ANSWER, metadata={"abstained": "no chunks to answer from"}
         )
         root.end()
         yield sse_event("token", {"text": FALLBACK_ANSWER})
@@ -314,6 +310,33 @@ def safe_filename(filename: str | None) -> str:
     if not normalized:
         raise HTTPException(422, "The filename is invalid")
     return normalized[:255]
+
+
+class LoginInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=200)
+
+
+@app.post("/v1/auth/login")
+def login(data: LoginInput, request: Request):
+    """Email and password for a workspace user; returns a session token to use as the Bearer."""
+    slow_down = "Too many sign-in attempts. Wait a minute and try again."
+    rate_limit(f"login-ip:{client_address(request)}", 20, message=slow_down)
+    rate_limit(f"login-email:{data.email.strip().lower()}", 5, message=slow_down)
+    result = authenticate(data.email, data.password)
+    if result is None:
+        raise HTTPException(401, "Wrong email or password")
+    return result
+
+
+@app.post("/v1/auth/logout", status_code=204)
+def logout(session: SessionDependency):
+    if session.session_hash:
+        session.connection.execute(
+            text("DELETE FROM user_sessions WHERE token_hash=:hash"), {"hash": session.session_hash}
+        )
+    return Response(status_code=204)
 
 
 @app.get("/v1/me")

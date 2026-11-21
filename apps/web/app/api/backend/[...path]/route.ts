@@ -14,9 +14,10 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     /^v1\/knowledge-bases$/,
     /^v1\/chat\/stream$/,
     /^v1\/chatbots$/,
+    /^v1\/auth\/(?:login|logout)$/,
     new RegExp(`^v1/knowledge-bases/${id}(?:/documents)?$`, "i"),
     new RegExp(`^v1/chatbots/${id}$`, "i"),
-    new RegExp(`^v1/documents/${id}(?:/reindex)?$`, "i"),
+    new RegExp(`^v1/documents/${id}(?:/reindex|/metadata)?$`, "i"),
     new RegExp(`^v1/ingestion-jobs/${id}(?:/process)?$`, "i"),
   ].some((pattern) => pattern.test(route));
   if (!allowed) return Response.json({ detail: "Not found" }, { status: 404 });
@@ -29,7 +30,7 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     const timeout = route.startsWith("v1/chat") || route.endsWith("/process") ? 120000 : 15000;
     const response = await fetch(new URL(route, (process.env.API_BASE_URL || "http://127.0.0.1:8000") + "/"), {
       method: request.method, headers,
-      body: request.method === "POST" ? await request.arrayBuffer() : undefined,
+      body: request.method === "POST" || request.method === "PUT" ? await request.arrayBuffer() : undefined,
       cache: "no-store", signal: AbortSignal.timeout(timeout),
     });
     return new Response(response.body, {
@@ -44,4 +45,5 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
 
 export const GET = proxy;
 export const POST = proxy;
+export const PUT = proxy;
 export const DELETE = proxy;

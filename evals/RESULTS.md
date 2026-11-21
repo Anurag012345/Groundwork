@@ -208,6 +208,30 @@ numbers, not its latency.
 - p50 latency varied by 2.7 s between identical runs, so latency differences under about 3 s on
   this machine are not meaningful.
 
+## 8. Query rewriting (retrieval only)
+
+The chat model (the 4B generator) rewrites each question into a search query; the original and the
+rewrite are both searched, fused with reciprocal-rank fusion, and the reranker scores the candidates
+against the original question. Retrieval-only runs, reranker on, 122 questions:
+
+| Question set | Rewrite | Doc hit | MRR | Passage recall | Retrieval p50 |
+|---|---|---|---|---|---|
+| Original golden set | off | 100% | 0.958 | 0.962 | 4.5 s |
+| Original golden set | on | 100% | 0.958 | 0.962 | 10.6 s |
+| Vague rewording (`golden_vague.jsonl`) | off | 99% | 0.935 | 0.913 | 4.6 s |
+| Vague rewording | on | 99% | 0.935 | 0.923 | 11.1 s |
+
+Rewriting changed nothing on the original set and moved passage recall by one point on the vague set
+(one question; inside the noise), while more than doubling retrieval time (about 6.5 s per question for
+the extra model call). It stays off by default (`QUERY_REWRITE=false`). The rewrite also sometimes
+invents context: 11 of 122 rewrites on the vague set name the "SEC", which is not in the question.
+
+Caveats: the vague set was reworded by qwen3:8b from the original questions and is only slightly
+less direct than them (retrieval fell from 0.958 to 0.935 MRR), so there was little room for a gain.
+Real user phrasing may be vaguer, and a larger rewriting model may do better; neither was tested. No
+answer-quality run was made with rewriting on. The first check, that the `rag.search` refactor
+reproduces the earlier retrieval numbers (1.0 / 0.958 / 0.962), passed.
+
 ## Caveats
 
 - One run per variant (only the final pipeline has 3, section 7), a 4B generator and an 8B judge.

@@ -32,9 +32,10 @@ STATUS.md is the only list.
   function time limits to fit inside and no reason for a queue or an object
   store. `LocalStorage` on the server's disk is the right answer.
 - **Billing, usage metering, `usage_events`.** Invoiced per installation.
-- **User login, memberships, roles, `users`.** One administrator API key per
-  installation, created by `rag.bootstrap`. Login stays a later dashboard task
-  only if a client asks for several people with separate access.
+- **Memberships and roles.** A `users` table with email-and-password sign-in was
+  added later (migration 0006, `rag.users`); each user belongs to one tenant and has
+  its full access. Roles and password reset stay unbuilt until a client asks for
+  people with separate access.
 - **Short-lived signed widget tokens.** The origin allowlist gives the same
   origin binding; the token's other benefit, per-session metering, does not exist.
 - **`conversations`, `messages`, conversation history.** Each question is

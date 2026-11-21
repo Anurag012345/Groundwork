@@ -29,11 +29,17 @@ class Settings(BaseSettings):
     # re-scores the top candidates; it needs the image built with EXTRAS=rerank.
     reranker_model: str = ""
     reranker_candidates: int = Field(default=20, ge=1, le=50)
+    # Ask the chat model to rewrite each question into a search query and search with both
+    # wordings. Costs one extra model call per question: about +6 s retrieval p50 with a 4B model, and
+    # no measured retrieval gain on the SEBI golden sets (evals/RESULTS.md section 8).
+    query_rewrite: bool = False
     # Langfuse tracing is on when both keys are set (needs the image built with EXTRAS=trace).
     langfuse_public_key: str = ""
     langfuse_secret_key: SecretStr | None = None
     langfuse_host: str = "https://cloud.langfuse.com"
     ingestion_lease_seconds: int = Field(default=900, ge=60, le=3600)
+    # How long a dashboard sign-in lasts before the user has to enter the password again.
+    session_hours: int = Field(default=12, ge=1, le=720)
 
 
 @lru_cache

@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 from uuid import UUID
 
@@ -44,6 +44,20 @@ def reciprocal_rank_fusion(
         )
         for item in ranked
     ]
+
+
+def fuse_rankings(
+    rankings: list[list[RetrievedChunk]], limit: int, rank_constant: int = 60
+) -> list[RetrievedChunk]:
+    """Reciprocal-rank fusion of several ranked chunk lists, e.g. one per query wording."""
+    scores: dict[UUID, float] = {}
+    first_seen: dict[UUID, RetrievedChunk] = {}
+    for ranking in rankings:
+        for rank, chunk in enumerate(ranking, start=1):
+            scores[chunk.id] = scores.get(chunk.id, 0.0) + 1 / (rank_constant + rank)
+            first_seen.setdefault(chunk.id, chunk)
+    best = sorted(scores, key=scores.__getitem__, reverse=True)[:limit]
+    return [replace(first_seen[chunk_id], score=scores[chunk_id]) for chunk_id in best]
 
 
 async def retrieve(

@@ -28,7 +28,8 @@ from rag.db import engine, set_tenant
 from rag.providers.base import ChatMessage
 from rag.providers.factory import chat_model, embedding_model
 from rag.rerank import reranker
-from rag.retrieval import retrieve
+from rag.rewrite import rewrite_query
+from rag.search import search
 from rag.security import tenant_from_key
 from scoring import abstained
 
@@ -85,29 +86,37 @@ async def main() -> None:
     parser.add_argument("--rerank", help="fastembed cross-encoder model, e.g. BAAI/bge-reranker-base")
     parser.add_argument("--candidates", type=int, default=20, help="chunks fetched before reranking")
     parser.add_argument("--kb", default="", help="knowledge base variant name (see ingest.py --name)")
+    parser.add_argument("--rewrite", action="store_true", help="rewrite each question into a search query first")
+    parser.add_argument("--golden", default="golden.jsonl", help="question file next to this script")
     args = parser.parse_args()
 
     tenant = tenant_from_key((ROOT / ".eval_key").read_text().strip())
     kb = UUID((ROOT / f".eval_kb{args.kb and '_' + args.kb}").read_text().strip())
-    rows = [json.loads(line) for line in (ROOT / "golden.jsonl").read_text(encoding="utf-8").splitlines() if line]
+    rows = [json.loads(line) for line in (ROOT / args.golden).read_text(encoding="utf-8").splitlines() if line]
     rows = rows[: args.limit] if args.limit else rows
     config = settings()
     embeddings = embedding_model(config)
     chat = None if args.no_generate else chat_model(config)
     cross_encoder = reranker(args.rerank) if args.rerank else None
     judge = chat_model(config.model_copy(update={"chat_model": args.judge})) if args.judge else None
+    # A separate client from `chat`, because retrieval-only runs build no generator at all.
+    rewriting = chat_model(config) if args.rewrite else None
+    rewrites: dict[str, str] = {}
+
+    async def rewriter(question: str) -> str:
+        rewrites[question] = await rewrite_query(rewriting, question)
+        return rewrites[question]
 
     results = []
     for n, row in enumerate(rows, 1):
         t0 = time.perf_counter()
         with engine().begin() as connection:
             set_tenant(connection, tenant)
-            chunks = await retrieve(
-                connection, kb, row["question"], embeddings,
-                args.candidates if cross_encoder else args.top_k, mode=args.mode,
+            chunks = await search(
+                connection, kb, row["question"], embeddings, args.top_k,
+                cross_encoder=cross_encoder, candidates=args.candidates,
+                rewriter=rewriter if rewriting else None, mode=args.mode,
             )
-        if cross_encoder:  # score the candidate pool with the cross-encoder, keep the best top_k
-            chunks = await asyncio.to_thread(cross_encoder.rerank, row["question"], chunks, args.top_k)
         retrieval_s = time.perf_counter() - t0
         docs = [c.document_name.removesuffix(".pdf") for c in chunks]
         gold = set(row["doc_ids"])
@@ -121,6 +130,8 @@ async def main() -> None:
             "passage_recall": (sum(squash(e["quote"]) in found for e in row["evidence"]) / len(row["evidence"]))
             if row["evidence"] else None,
         }
+        if rewriting:
+            rec["rewrite"] = rewrites.get(row["question"])
         if chat:
             messages = grounding_messages(row["question"], chunks)
             answer, ttft, gen_s = await generate(chat, messages)
@@ -155,7 +166,9 @@ def summarize(results: list[dict], args) -> dict:
     unanswerable = [r for r in results if not r["answerable"]]
     summary = {
         "config": {"top_k": args.top_k, "mode": args.mode, "rerank": args.rerank, "candidates": args.candidates if args.rerank else None, "kb": args.kb or "default", "chat_model": settings().chat_model, "judge": args.judge,
-                   "embedding_model": settings().embedding_model, "questions": len(results)},
+                   "embedding_model": settings().embedding_model, "questions": len(results),
+                   "rewrite": args.rewrite or None,
+                   "golden": args.golden if args.golden != "golden.jsonl" else None},
         "retrieval": {k: rate(answerable, k) for k in ("doc_hit", "doc_recall", "mrr", "passage_recall")},
         "retrieval_by_type": {
             t: rate([r for r in answerable if r["type"] == t], "doc_hit")

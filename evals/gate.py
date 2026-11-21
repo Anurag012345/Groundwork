@@ -24,7 +24,7 @@ GATES = {
     "abstention.correct_refusal_on_unanswerable": ("min", 0.10),
     "abstention.false_refusal_on_answerable": ("max", 0.03),
 }
-SAME_CONFIG = ("top_k", "mode", "rerank", "candidates", "kb", "chat_model", "judge", "embedding_model", "questions")
+SAME_CONFIG = ("top_k", "mode", "rerank", "candidates", "kb", "chat_model", "judge", "embedding_model", "questions", "rewrite", "golden")
 
 
 def lookup(summary: dict, path: str):

@@ -37,6 +37,8 @@ TENANT_TABLES = (
     "chunks",
     "ingestion_jobs",
     "chatbots",
+    "users",
+    "user_sessions",
 )
 
 

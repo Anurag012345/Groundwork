@@ -16,11 +16,14 @@ class OpenAICompatibleChatModel(ChatModel):
             timeout=timeout,
         )
 
-    async def stream(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
+    async def stream(
+        self, messages: list[ChatMessage], temperature: float | None = None
+    ) -> AsyncIterator[str]:
+        payload = chat_payload(self.model, messages, True)
+        if temperature is not None:
+            payload["temperature"] = temperature
         try:
-            async with self.client.stream(
-                "POST", "chat/completions", json=chat_payload(self.model, messages, True)
-            ) as response:
+            async with self.client.stream("POST", "chat/completions", json=payload) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):

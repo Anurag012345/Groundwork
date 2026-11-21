@@ -16,8 +16,10 @@ class ChatMessage:
 
 class ChatModel(ABC):
     @abstractmethod
-    async def stream(self, messages: list[ChatMessage]) -> AsyncIterator[str]:
-        """Yield response text as it becomes available."""
+    async def stream(
+        self, messages: list[ChatMessage], temperature: float | None = None
+    ) -> AsyncIterator[str]:
+        """Yield response text as it becomes available. None leaves the provider's default."""
 
 
 class EmbeddingModel(ABC):

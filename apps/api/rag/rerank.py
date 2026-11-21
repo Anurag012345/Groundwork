@@ -14,6 +14,7 @@ class CrossEncoderReranker:
     def __init__(self, model_name: str):
         from fastembed.rerank.cross_encoder import TextCrossEncoder
 
+        self.model_name = model_name
         # Downloads on first use into FASTEMBED_CACHE_PATH, so keep that on a persistent volume.
         self.model = TextCrossEncoder(model_name=model_name)
 
